@@ -53,8 +53,7 @@ const members: TeamMember[] = [
     workspaceId: "w1",
     name: "Ada Lovelace",
     email: "ada@example.com",
-    role: "Admin",
-    department: "Engineering",
+    role: "ADMIN",
     joinedAt: "Jan 2026",
   },
   {
@@ -62,8 +61,7 @@ const members: TeamMember[] = [
     workspaceId: "w1",
     name: "Grace Hopper",
     email: "grace@example.com",
-    role: "Member",
-    department: "Design",
+    role: "MEMBER",
     joinedAt: "Feb 2026",
   },
 ];
@@ -259,13 +257,14 @@ const checks: { name: string; run: () => void | Promise<void> }[] = [
     },
   },
   {
-    name: "service answers locally when no api url is configured",
+    name: "service answers locally when no session is available",
     run: async () => {
-      const answer = await askAssistant("What tasks are overdue?", workspace);
+      const reply = await askAssistant("What tasks are overdue?", workspace);
 
-      assert.equal(answer.source, "engine");
-      assert.equal(answer.intent, "overdue-tasks");
-      assert.equal(answer.tasks.length, 1);
+      assert.equal(reply.conversationId, null);
+      assert.equal(reply.answer.source, "engine");
+      assert.equal(reply.answer.intent, "overdue-tasks");
+      assert.equal(reply.answer.tasks.length, 1);
     },
   },
   {
@@ -276,27 +275,33 @@ const checks: { name: string; run: () => void | Promise<void> }[] = [
       globalThis.fetch = (async () =>
         new Response(
           JSON.stringify({
-            headline: "Remote headline",
-            narrative: "Remote narrative",
-            sections: [{ heading: "Remote section", bullets: ["remote bullet"] }],
-            followUps: ["Remote follow up"],
+            success: true,
+            data: {
+              headline: "Remote headline",
+              narrative: "Remote narrative",
+              sections: [
+                { heading: "Remote section", bullets: ["remote bullet"] },
+              ],
+              followUps: ["Remote follow up"],
+              conversationId: "c1",
+            },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } }
         )) as typeof fetch;
 
       try {
-        const answer = await askAssistant(
-          "What tasks are overdue?",
-          workspace,
-          "http://localhost:4000"
-        );
+        const reply = await askAssistant("What tasks are overdue?", workspace, {
+          token: "token",
+          workspaceId: "w1",
+        });
 
-        assert.equal(answer.source, "llm");
-        assert.equal(answer.headline, "Remote headline");
-        assert.equal(answer.narrative, "Remote narrative");
-        assert.equal(answer.sections[0].heading, "Remote section");
-        assert.equal(answer.followUps[0], "Remote follow up");
-        assert.equal(answer.tasks.length, 1);
+        assert.equal(reply.conversationId, "c1");
+        assert.equal(reply.answer.source, "llm");
+        assert.equal(reply.answer.headline, "Remote headline");
+        assert.equal(reply.answer.narrative, "Remote narrative");
+        assert.equal(reply.answer.sections[0].heading, "Remote section");
+        assert.equal(reply.answer.followUps[0], "Remote follow up");
+        assert.equal(reply.answer.tasks.length, 1);
       } finally {
         globalThis.fetch = original;
       }
@@ -312,10 +317,15 @@ const checks: { name: string; run: () => void | Promise<void> }[] = [
       }) as typeof fetch;
 
       try {
-        const answer = await askAssistant("What tasks are overdue?", workspace, "http://localhost:4000");
+        const reply = await askAssistant("What tasks are overdue?", workspace, {
+          token: "token",
+          workspaceId: "w1",
+          conversationId: "c1",
+        });
 
-        assert.equal(answer.source, "engine");
-        assert.equal(answer.tasks.length, 1);
+        assert.equal(reply.conversationId, "c1");
+        assert.equal(reply.answer.source, "engine");
+        assert.equal(reply.answer.tasks.length, 1);
       } finally {
         globalThis.fetch = original;
       }

@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "check:ai": "node --experimental-strip-types scripts/ai-check.ts",
+    "check:auth": "node --experimental-strip-types scripts/auth-check.ts",
+    "check:ui": "vite build --ssr scripts/render-check.tsx --outDir .tmp-render --logLevel error && node .tmp-render/render-check.js",
     "lint": "oxlint",
     "preview": "vite preview"
   },
