@@ -824,6 +824,33 @@ check("the assistant answers from the workspace context without a provider key",
   }
 });
 
+check("a provider failure still answers from the workspace context", async () => {
+  const providerUrl = process.env.ANTHROPIC_API_URL;
+
+  // Nothing listens on this port, so the provider call fails.
+  process.env.ANTHROPIC_API_URL = "http://127.0.0.1:1";
+
+  try {
+    const answer = await call<{ headline: string; source: string }>(
+      "/api/ai/chat",
+      {
+        method: "POST",
+        token: ownerToken,
+        body: {
+          workspaceId,
+          question: "What is overdue in this workspace?",
+        },
+      }
+    );
+
+    assert.equal(answer.status, 200);
+    assert.equal(answer.body.data!.source, "engine");
+    assert.match(answer.body.data!.headline, /overdue/);
+  } finally {
+    process.env.ANTHROPIC_API_URL = providerUrl;
+  }
+});
+
 check("the assistant refuses a workspace the caller does not belong to", async () => {
   const other = await call<{
     user: { id: string };
