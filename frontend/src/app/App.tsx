@@ -9,6 +9,7 @@ import Projects from "../pages/Projects";
 import ProjectDetails from "../pages/ProjectDetails";
 import Tasks from "../pages/Tasks";
 import Team from "../pages/Team";
+
 import AIAssistant from "../features/ai-assistant/AIAssistant";
 
 import AppProviders from "./providers";
@@ -27,6 +28,11 @@ function AppContent() {
   function backToProjects() {
     setSelectedProjectId(null);
     setActivePage("Projects");
+  }
+
+  function handleNavigation(page: string) {
+    setSelectedProjectId(null);
+    setActivePage(page);
   }
 
   const renderPage = () => {
@@ -49,11 +55,11 @@ function AppContent() {
       case "My Tasks":
         return <Tasks />;
 
-      case "Team Members":
-        return <Team />;
-
       case "AI Assistant":
         return <AIAssistant onOpenProject={openProject} />;
+
+      case "Team Members":
+        return <Team />;
 
       default:
         return (
@@ -61,6 +67,7 @@ function AppContent() {
             <h2 className="text-lg font-semibold text-slate-800">
               {activePage}
             </h2>
+
             <p className="mt-2 text-sm text-slate-500">
               This module is coming in a later development phase.
             </p>
@@ -69,18 +76,16 @@ function AppContent() {
     }
   };
 
-  const pageTitle = selectedProjectId && activePage === "Projects"
-    ? "Project Details"
-    : activePage;
+  const pageTitle =
+    activePage === "Projects" && selectedProjectId
+      ? "Project Details"
+      : activePage;
 
   return (
     <div className="flex min-h-screen bg-slate-50">
       <Sidebar
         activePage={activePage}
-        onNavigate={(page) => {
-          setSelectedProjectId(null);
-          setActivePage(page);
-        }}
+        onNavigate={handleNavigation}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
