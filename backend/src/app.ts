@@ -14,9 +14,16 @@ const app = express();
 
 app.use(helmet());
 
+// A comma separated list allows a second frontend origin, for example a
+// preview build next to the dev server.
+const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: corsOrigins,
     credentials: true,
   })
 );
