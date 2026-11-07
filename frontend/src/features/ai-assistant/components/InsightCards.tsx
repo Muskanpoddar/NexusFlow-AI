@@ -10,6 +10,8 @@ import {
   UserX,
 } from "lucide-react";
 
+import { formatRole } from "../../auth/authService";
+
 import type {
   HealthLevel,
   ProjectInsight,
@@ -243,7 +245,9 @@ export function WorkloadCard({ insight }: WorkloadCardProps) {
             {insight.name}
           </p>
 
-          <p className="mt-0.5 text-xs text-slate-500">{insight.role}</p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {formatRole(insight.role)}
+          </p>
         </div>
 
         <span className={`shrink-0 text-xs font-semibold ${style.text}`}>

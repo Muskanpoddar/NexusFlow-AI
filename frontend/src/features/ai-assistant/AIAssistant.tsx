@@ -12,8 +12,13 @@ import {
 } from "lucide-react";
 
 import { useWorkspace } from "../../hooks/useWorkspace";
-import { analyzeProjects, isOverdue, type AIAnswer } from "./aiEngine";
-import { askAssistant } from "./aiService";
+import { useAuth } from "../../hooks/useAuth";
+import { analyzeProjects, isOverdue } from "./aiEngine";
+import {
+  askAssistant,
+  loadConversationHistory,
+  type ChatMessage,
+} from "./aiService";
 import {
   ProjectHealthCard,
   ReportSections,
@@ -23,13 +28,6 @@ import {
 
 interface AIAssistantProps {
   onOpenProject: (projectId: string) => void;
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  text?: string;
-  answer?: AIAnswer;
 }
 
 const STARTER_PROMPTS = [
@@ -70,11 +68,14 @@ function sleep(ms: number) {
 }
 
 function AIAssistant({ onOpenProject }: AIAssistantProps) {
-  const { projects, tasks, members, activities, updateTask } = useWorkspace();
+  const { projects, tasks, members, activities, updateTask, workspaceId } =
+    useWorkspace();
+  const { token } = useAuth();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [today] = useState(() => new Date());
@@ -99,6 +100,31 @@ function AIAssistant({ onOpenProject }: AIAssistantProps) {
     }
   }, [messages, thinking]);
 
+  // Restore the persisted conversation whenever the workspace changes.
+  useEffect(() => {
+    let active = true;
+
+    setMessages([]);
+    setConversationId(null);
+
+    if (!token || !workspaceId) return;
+
+    loadConversationHistory(token, workspaceId)
+      .then((history) => {
+        if (!active) return;
+
+        setConversationId(history.conversationId);
+        setMessages(history.messages);
+      })
+      .catch(() => {
+        // A missing history is not an error, the chat simply starts empty.
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [token, workspaceId]);
+
   async function send(question: string) {
     const trimmed = question.trim();
 
@@ -112,18 +138,26 @@ function AIAssistant({ onOpenProject }: AIAssistantProps) {
     setInput("");
     setThinking(true);
 
-    const answer = await askAssistant(trimmed, {
-      projects,
-      tasks,
-      members,
-      activities,
-    });
+    const reply = await askAssistant(
+      trimmed,
+      {
+        projects,
+        tasks,
+        members,
+        activities,
+      },
+      token && workspaceId
+        ? { token, workspaceId, conversationId }
+        : undefined
+    );
 
     await sleep(420);
 
+    setConversationId(reply.conversationId);
+
     setMessages((previous) => [
       ...previous,
-      { id: crypto.randomUUID(), role: "assistant", answer },
+      { id: crypto.randomUUID(), role: "assistant", answer: reply.answer },
     ]);
 
     setThinking(false);
@@ -237,68 +271,76 @@ function AIAssistant({ onOpenProject }: AIAssistantProps) {
                 </div>
 
                 <div className="min-w-0 flex-1 space-y-3">
-                  <div className="animate-slide-up">
-                    <p className="text-sm font-semibold text-slate-900">
-                      {message.answer?.headline}
-                    </p>
+                  {message.answer ? (
+                    <>
+                      <div className="animate-slide-up">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {message.answer.headline}
+                        </p>
 
-                    {message.answer?.narrative && (
-                      <p className="mt-1 text-sm leading-relaxed text-slate-600">
-                        {message.answer.narrative}
-                      </p>
-                    )}
-                  </div>
+                        {message.answer.narrative && (
+                          <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                            {message.answer.narrative}
+                          </p>
+                        )}
+                      </div>
 
-                  {message.answer && message.answer.sections.length > 0 && (
-                    <ReportSections sections={message.answer.sections} />
-                  )}
+                      {message.answer.sections.length > 0 && (
+                        <ReportSections sections={message.answer.sections} />
+                      )}
 
-                  {message.answer && message.answer.projects.length > 0 && (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {message.answer.projects.map((insight) => (
-                        <ProjectHealthCard
-                          key={insight.id}
-                          insight={insight}
-                          onOpenProject={onOpenProject}
-                        />
-                      ))}
-                    </div>
-                  )}
+                      {message.answer.projects.length > 0 && (
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {message.answer.projects.map((insight) => (
+                            <ProjectHealthCard
+                              key={insight.id}
+                              insight={insight}
+                              onOpenProject={onOpenProject}
+                            />
+                          ))}
+                        </div>
+                      )}
 
-                  {message.answer && message.answer.tasks.length > 0 && (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {message.answer.tasks.map((insight) => (
-                        <TaskInsightCard
-                          key={insight.id}
-                          insight={insight}
-                          onComplete={(taskId) =>
-                            updateTask(taskId, { status: "Done" })
-                          }
-                          onOpenProject={onOpenProject}
-                        />
-                      ))}
-                    </div>
-                  )}
+                      {message.answer.tasks.length > 0 && (
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {message.answer.tasks.map((insight) => (
+                            <TaskInsightCard
+                              key={insight.id}
+                              insight={insight}
+                              onComplete={(taskId) =>
+                                updateTask(taskId, { status: "Done" })
+                              }
+                              onOpenProject={onOpenProject}
+                            />
+                          ))}
+                        </div>
+                      )}
 
-                  {message.answer && message.answer.workload.length > 0 && (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {message.answer.workload.map((insight) => (
-                        <WorkloadCard key={insight.id} insight={insight} />
-                      ))}
-                    </div>
-                  )}
+                      {message.answer.workload.length > 0 && (
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                          {message.answer.workload.map((insight) => (
+                            <WorkloadCard key={insight.id} insight={insight} />
+                          ))}
+                        </div>
+                      )}
 
-                  {message.answer && message.answer.followUps.length > 0 && (
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {message.answer.followUps.map((followUp) => (
-                        <button
-                          key={followUp}
-                          onClick={() => void send(followUp)}
-                          className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
-                        >
-                          {followUp}
-                        </button>
-                      ))}
+                      {message.answer.followUps.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {message.answer.followUps.map((followUp) => (
+                            <button
+                              key={followUp}
+                              onClick={() => void send(followUp)}
+                              className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-600"
+                            >
+                              {followUp}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="animate-pop-in whitespace-pre-line rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-700 shadow-sm">
+                      {message.text}
                     </div>
                   )}
                 </div>
