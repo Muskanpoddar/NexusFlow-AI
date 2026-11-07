@@ -3,7 +3,7 @@ import { prisma } from "../../lib/prisma.js";
 import { getWorkspaceContext, type WorkspaceContext } from "./ai.context.js";
 import { buildMessages, type PromptMessage } from "./ai.prompts.js";
 import {
-  askMiniMax,
+  askClaude,
   isProviderConfigured,
   parseModelAnswer,
 } from "./ai.provider.js";
@@ -191,16 +191,20 @@ export async function chatWithAssistant(input: {
   const history = conversation ? await getRecentMessages(conversation.id) : [];
 
   let answer: AIAnswer;
+  let source: "llm" | "engine" = "engine";
 
   if (providerReady) {
     try {
       answer = parseModelAnswer(
-        await askMiniMax(buildMessages(context, input.question, history))
+        await askClaude(buildMessages(context, input.question, history))
       );
+      source = "llm";
     } catch (error) {
+      // shortcut: a provider failure must not break the chat, the workspace
+      // snapshot still answers the question.
       console.error("AI provider error:", error);
 
-      throw new AIError("The assistant is temporarily unavailable", 502);
+      answer = buildContextAnswer(context, input.question);
     }
   } else {
     answer = buildContextAnswer(context, input.question);
@@ -232,7 +236,7 @@ export async function chatWithAssistant(input: {
 
   return {
     ...answer,
-    source: providerReady ? ("llm" as const) : ("engine" as const),
+    source,
     conversationId,
   };
 }

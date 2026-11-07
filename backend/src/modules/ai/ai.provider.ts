@@ -1,8 +1,7 @@
-
+import Anthropic from "@anthropic-ai/sdk";
 import { answerSchema, type AIAnswer } from "./ai.validation.js";
 
-const DEFAULT_API_URL = "https://api.minimax.io/v1";
-const DEFAULT_MODEL = "MiniMax-M3.1-Flash";
+const DEFAULT_MODEL = "claude-opus-5-5";
 
 export interface ProviderMessage {
   role: "system" | "user" | "assistant";
@@ -10,45 +9,49 @@ export interface ProviderMessage {
 }
 
 export function isProviderConfigured(): boolean {
-  return Boolean(process.env.MINIMAX_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
-export async function askMiniMax(messages: ProviderMessage[]): Promise<string> {
-  const apiKey = process.env.MINIMAX_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("MINIMAX_API_KEY is not configured");
-  }
-
-  const baseUrl = (process.env.MINIMAX_API_URL ?? DEFAULT_API_URL).replace(/\/$/, "");
-  const model = process.env.MINIMAX_MODEL ?? DEFAULT_MODEL;
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      max_completion_tokens: 2048,
-    }),
+export async function askClaude(messages: ProviderMessage[]): Promise<string> {
+  // The base URL is set here on purpose, an ambient ANTHROPIC_BASE_URL from
+  // the shell would otherwise point the app at another provider.
+  const client = new Anthropic({
+    baseURL: process.env.ANTHROPIC_API_URL ?? "https://api.anthropic.com",
   });
 
-  if (!response.ok) {
-    throw new Error(`MiniMax request failed with status ${response.status}`);
-  }
+  // Anthropic keeps the system prompt out of the conversation.
+  const system = messages
+    .filter((message) => message.role === "system")
+    .map((message) => message.content)
+    .join("\n\n");
 
-  const payload = (await response.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
+  const chat: Anthropic.Beta.BetaMessageParam[] = messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: message.content,
+    }));
 
-  const content = payload.choices?.[0]?.message?.content?.trim();
+  const response = await client.beta.messages.create({
+    // A refused request is re-run on a fallback model inside the same call.
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    model: process.env.ANTHROPIC_MODEL ?? DEFAULT_MODEL,
+    max_tokens: 16000,
+    system,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "medium" },
+    messages: chat,
+  });
+
+  const content = response.content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text)
+    .join("\n")
+    .trim();
 
   if (!content) {
-    throw new Error("MiniMax returned an empty answer");
+    throw new Error("Claude returned an empty answer");
   }
 
   return content;

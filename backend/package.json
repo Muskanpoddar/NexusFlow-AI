@@ -12,9 +12,11 @@
     "check:integration": "tsx scripts/integration-check.ts",
     "prisma:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:cleanup-test-data": "tsx scripts/cleanup-test-data.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.6.0",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "bcryptjs": "^3.0.3",
