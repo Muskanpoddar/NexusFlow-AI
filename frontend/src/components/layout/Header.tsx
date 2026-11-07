@@ -52,6 +52,7 @@ function Header({ pageTitle, onNavigate, onOpenProject }: HeaderProps) {
     projects,
     tasks,
     members,
+    activities,
   } = useWorkspace();
   const [menuOpen, setMenuOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -60,6 +61,24 @@ function Header({ pageTitle, onNavigate, onOpenProject }: HeaderProps) {
   const [workspaceName, setWorkspaceName] = useState("");
   const [workspaceError, setWorkspaceError] = useState("");
   const [query, setQuery] = useState("");
+
+  // The dot marks the activity that arrived since the panel was opened.
+  const seenKey = `nexusflow-activity-seen-${currentWorkspace?.id ?? "none"}`;
+  const [lastSeenAt, setLastSeenAt] = useState(() =>
+    Number(localStorage.getItem(seenKey) ?? 0)
+  );
+
+  const latestActivityAt = useMemo(
+    () =>
+      activities.reduce((latest, activity) => {
+        const time = Date.parse(activity.createdAt);
+
+        return Number.isNaN(time) ? latest : Math.max(latest, time);
+      }, 0),
+    [activities]
+  );
+
+  const hasUnreadActivity = latestActivityAt > lastSeenAt;
 
   const name = user?.name ?? "Guest";
   const firstName = name.split(" ")[0];
@@ -119,6 +138,13 @@ function Header({ pageTitle, onNavigate, onOpenProject }: HeaderProps) {
   function selectWorkspace(id: string) {
     setWorkspaceOpen(false);
     switchWorkspace(id);
+
+    // Every workspace keeps its own seen marker.
+    setLastSeenAt(
+      Number(
+        localStorage.getItem(`nexusflow-activity-seen-${id}`) ?? 0
+      )
+    );
   }
 
   function openHit(hit: SearchHit) {
@@ -130,6 +156,18 @@ function Header({ pageTitle, onNavigate, onOpenProject }: HeaderProps) {
     }
 
     onOpenProject(hit.id);
+  }
+
+  function toggleNotifications() {
+    const next = !notificationsOpen;
+
+    setNotificationsOpen(next);
+
+    if (next) {
+      // Opening the panel marks the activity as seen.
+      setLastSeenAt(latestActivityAt);
+      localStorage.setItem(seenKey, String(latestActivityAt));
+    }
   }
 
   async function submitWorkspace(event: FormEvent<HTMLFormElement>) {
@@ -354,9 +392,7 @@ function Header({ pageTitle, onNavigate, onOpenProject }: HeaderProps) {
             type="button"
             aria-label="Notifications"
             aria-expanded={notificationsOpen}
-            onClick={() =>
-              setNotificationsOpen((current) => !current)
-            }
+            onClick={toggleNotifications}
             className="group relative rounded-lg p-2 text-slate-500 transition-all duration-200 hover:bg-slate-100 hover:text-slate-700 active:scale-95"
           >
             <Bell
@@ -364,7 +400,9 @@ function Header({ pageTitle, onNavigate, onOpenProject }: HeaderProps) {
               className="transition-transform duration-200 group-hover:-rotate-6"
             />
 
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 animate-pulse-soft rounded-full bg-red-500 ring-2 ring-white" />
+            {hasUnreadActivity && (
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 animate-pulse-soft rounded-full bg-red-500 ring-2 ring-white" />
+            )}
           </button>
 
           {notificationsOpen && (
