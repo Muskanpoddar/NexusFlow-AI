@@ -38,6 +38,10 @@ const { default: App } = await import("../src/app/App");
 const { default: MemberModal } = await import(
   "../src/features/team/MemberModal"
 );
+const { default: InviteModal } = await import(
+  "../src/features/team/InviteModal"
+);
+const { InviteLanding } = await import("../src/features/auth/AcceptInvite");
 
 const screens: [string, () => React.ReactElement, string?][] = [
   [
@@ -97,6 +101,25 @@ const screens: [string, () => React.ReactElement, string?][] = [
       />
     ),
     "Workspace Owner",
+  ],
+  [
+    "InviteModal",
+    () => (
+      <InviteModal
+        allowAdmin
+        onClose={() => {}}
+        onInvite={async () => ({
+          inviteLink: "http://localhost:5173/?inviteToken=abc",
+          emailed: false,
+        })}
+      />
+    ),
+    "Invite a team member",
+  ],
+  [
+    "InviteLanding",
+    () => <InviteLanding onRegister={() => {}} onLogin={() => {}} />,
+    "Create an account",
   ],
 ];
 

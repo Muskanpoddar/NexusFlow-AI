@@ -1,6 +1,5 @@
-
 import { useEffect, useState, type FormEvent } from "react";
-import { X, UserPlus, FolderKanban } from "lucide-react";
+import { X, FolderKanban, Save } from "lucide-react";
 
 import { formatRole } from "../auth/authService";
 import type { MemberRole } from "../../types/team";
@@ -23,9 +22,8 @@ export interface TeamMember {
 }
 
 interface MemberModalProps {
-  member: TeamMember | null;
+  member: TeamMember;
   projects: TeamProject[];
-  initialProjectIds?: string[];
   serverError?: string;
   onClose: () => void;
   onSave: (member: Omit<TeamMember, "id" | "joinedAt">) => void;
@@ -34,31 +32,17 @@ interface MemberModalProps {
 function MemberModal({
   member,
   projects,
-  initialProjectIds,
   serverError,
   onClose,
   onSave,
 }: MemberModalProps) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState<MemberRole>("MEMBER");
-  const [projectIds, setProjectIds] = useState<string[]>([]);
-  const [error, setError] = useState("");
+  const [role, setRole] = useState<MemberRole>(member.role);
+  const [projectIds, setProjectIds] = useState<string[]>(member.projectIds);
 
   useEffect(() => {
-    if (member) {
-      setName(member.name);
-      setEmail(member.email);
-      setRole(member.role);
-      setProjectIds(member.projectIds);
-    } else {
-      setName("");
-      setEmail("");
-      setRole("MEMBER");
-      setProjectIds(initialProjectIds ?? []);
-    }
-    setError("");
-  }, [member, initialProjectIds]);
+    setRole(member.role);
+    setProjectIds(member.projectIds);
+  }, [member]);
 
   const toggleProject = (projectId: string) => {
     setProjectIds((current) =>
@@ -71,19 +55,9 @@ function MemberModal({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!email.trim()) {
-      setError("Email is required.");
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setError("Enter a valid email address.");
-      return;
-    }
-
     onSave({
-      name: name.trim(),
-      email: email.trim(),
+      name: member.name,
+      email: member.email,
       role,
       projectIds,
     });
@@ -95,12 +69,13 @@ function MemberModal({
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-5">
           <div>
             <h2 className="text-xl font-bold text-slate-900">
-              {member ? "Edit team member" : "Add team member"}
+              Edit team member
             </h2>
             <p className="mt-1 text-sm text-slate-500">
-              Manage member details and project assignments.
+              Change the role and the project assignments.
             </p>
           </div>
+
           <button
             type="button"
             onClick={onClose}
@@ -123,12 +98,11 @@ function MemberModal({
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 Full name
               </label>
+
               <input
-                value={name}
-                readOnly={Boolean(member)}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Enter full name"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 read-only:bg-slate-50"
+                value={member.name}
+                readOnly
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm read-only:bg-slate-50"
               />
             </div>
 
@@ -136,18 +110,15 @@ function MemberModal({
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 Email address
               </label>
+
               <input
-                type="email"
-                value={email}
-                readOnly={Boolean(member)}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@company.com"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 read-only:bg-slate-50"
+                value={member.email}
+                readOnly
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm read-only:bg-slate-50"
               />
+
               <p className="mt-1.5 text-xs text-slate-400">
-                {member
-                  ? "Name and email come from the member's own account."
-                  : "The person must already have a NexusFlow account — we add them by email."}
+                Name and email come from the member's own account.
               </p>
             </div>
 
@@ -156,7 +127,7 @@ function MemberModal({
                 Role
               </label>
 
-              {member?.role === "OWNER" ? (
+              {member.role === "OWNER" ? (
                 <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
                   <span className="font-medium">
                     {formatRole(member.role)}
@@ -222,12 +193,6 @@ function MemberModal({
             </div>
           </div>
 
-          {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
-              {error}
-            </p>
-          )}
-
           <div className="flex justify-end gap-3 border-t border-slate-100 pt-5">
             <button
               type="button"
@@ -236,12 +201,13 @@ function MemberModal({
             >
               Cancel
             </button>
+
             <button
               type="submit"
               className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
             >
-              <UserPlus size={16} />
-              {member ? "Save changes" : "Add member"}
+              <Save size={16} />
+              Save changes
             </button>
           </div>
         </form>

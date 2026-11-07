@@ -13,7 +13,11 @@ import { apiRequest } from "../services/api/apiClient";
 
 import type { Project } from "../types/project";
 import type { Task } from "../types/task";
-import type { MemberRole, TeamMember } from "../types/team";
+import type {
+  MemberRole,
+  TeamMember,
+  WorkspaceInvitation,
+} from "../types/team";
 import type { Activity } from "../types/activity";
 
 export interface WorkspaceData {
@@ -32,7 +36,6 @@ export interface WorkspaceSummary {
 
 type ProjectInput = Omit<Project, "id" | "createdAt" | "workspaceId">;
 type TaskInput = Omit<Task, "id" | "createdAt" | "workspaceId">;
-type MemberInput = Omit<TeamMember, "id" | "joinedAt" | "workspaceId">;
 
 export interface WorkspaceContextValue extends WorkspaceData {
   loading: boolean;
@@ -58,12 +61,26 @@ export interface WorkspaceContextValue extends WorkspaceData {
   ) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
 
-  createMember: (data: MemberInput) => Promise<string>;
   updateMember: (
     id: string,
     data: Partial<Omit<TeamMember, "id" | "workspaceId">>
   ) => Promise<void>;
   deleteMember: (id: string) => Promise<void>;
+
+  invitations: WorkspaceInvitation[];
+  inviteMember: (
+    email: string,
+    role: MemberRole
+  ) => Promise<{
+    email: string;
+    role: MemberRole;
+    inviteLink: string;
+    emailed: boolean;
+  }>;
+  revokeInvitation: (id: string) => Promise<void>;
+  acceptInvitation: (
+    token: string
+  ) => Promise<{ workspaceId: string; workspaceName: string }>;
 
   assignMemberToProject: (
     projectId: string,
@@ -161,11 +178,12 @@ function taskStatus(value: unknown): Task["status"] {
   return map[status] ?? "To Do";
 }
 
-function priority(value: unknown): "Low" | "Medium" | "High" {
+function priority(value: unknown): "Low" | "Medium" | "High" | "Urgent" {
   const result = String(value ?? "MEDIUM").toUpperCase();
 
   if (result === "LOW") return "Low";
-  if (result === "HIGH" || result === "URGENT") return "High";
+  if (result === "URGENT") return "Urgent";
+  if (result === "HIGH") return "High";
 
   return "Medium";
 }
@@ -395,9 +413,38 @@ export function WorkspaceProvider({
     }
   }, [isAuthenticated, token, workspaceId, request]);
 
+  const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([]);
+
+  const refreshInvitations = useCallback(async () => {
+    if (!token || !workspaceId) {
+      setInvitations([]);
+      return;
+    }
+
+    try {
+      const response = await request<unknown>(
+        `/api/workspaces/${workspaceId}/invitations`
+      );
+
+      setInvitations(
+        extractArray(response, ["invitations"]).map((item) => ({
+          id: String(item.id),
+          email: String(item.email ?? ""),
+          role: memberRole(item.role),
+          expiresAt: String(item.expiresAt ?? ""),
+          createdAt: String(item.createdAt ?? ""),
+        }))
+      );
+    } catch {
+      // Only owners and admins are allowed to list the invitations.
+      setInvitations([]);
+    }
+  }, [token, workspaceId, request]);
+
   useEffect(() => {
     void refreshWorkspace();
-  }, [refreshWorkspace]);
+    void refreshInvitations();
+  }, [refreshWorkspace, refreshInvitations]);
 
   const createWorkspace = useCallback(
     async (name: string) => {
@@ -604,30 +651,6 @@ export function WorkspaceProvider({
     [workspaceId, data.tasks, request, refreshWorkspace]
   );
 
-  const createMember = useCallback(
-    async (input: MemberInput) => {
-      if (!workspaceId) throw new Error("No workspace is selected.");
-
-      const created = await request<AnyRecord>(
-        `/api/workspaces/${workspaceId}/members`,
-        {
-          method: "POST",
-          body: {
-            email: input.email,
-            role: input.role,
-          },
-        }
-      );
-
-      await refreshWorkspace();
-
-      const user = asRecord(created.user);
-
-      return String(created.userId ?? user.id ?? "");
-    },
-    [workspaceId, request, refreshWorkspace]
-  );
-
   const updateMember = useCallback(
     async (
       id: string,
@@ -669,6 +692,65 @@ export function WorkspaceProvider({
       await refreshWorkspace();
     },
     [workspaceId, request, refreshWorkspace]
+  );
+
+  const inviteMember = useCallback(
+    async (email: string, role: MemberRole) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
+
+      const created = await request<AnyRecord>(
+        `/api/workspaces/${workspaceId}/invitations`,
+        {
+          method: "POST",
+          body: { email, role },
+        }
+      );
+
+      await refreshInvitations();
+
+      return {
+        email: String(created.email ?? email),
+        role: memberRole(created.role),
+        inviteLink: String(created.inviteLink ?? ""),
+        emailed: Boolean(created.emailed),
+      };
+    },
+    [workspaceId, request, refreshInvitations]
+  );
+
+  const revokeInvitation = useCallback(
+    async (id: string) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
+
+      await request(
+        `/api/workspaces/${workspaceId}/invitations/${id}`,
+        { method: "DELETE" }
+      );
+
+      await refreshInvitations();
+    },
+    [workspaceId, request, refreshInvitations]
+  );
+
+  const acceptInvitation = useCallback(
+    async (token: string) => {
+      const accepted = await request<AnyRecord>(
+        "/api/workspaces/invitations/accept",
+        { method: "POST", body: { token } }
+      );
+
+      const workspace = asRecord(accepted.workspace);
+
+      // The membership belongs to the user, so the workspace list is reloaded.
+      await refreshUser();
+      await refreshWorkspace();
+
+      return {
+        workspaceId: String(workspace.id ?? ""),
+        workspaceName: String(workspace.name ?? ""),
+      };
+    },
+    [request, refreshUser, refreshWorkspace]
   );
 
   const assignMemberToProject = useCallback(
@@ -762,9 +844,12 @@ export function WorkspaceProvider({
       createTask,
       updateTask,
       deleteTask,
-      createMember,
       updateMember,
       deleteMember,
+      invitations,
+      inviteMember,
+      revokeInvitation,
+      acceptInvitation,
       assignMemberToProject,
       removeMemberFromProject,
       getProjectProgress,
@@ -788,9 +873,12 @@ export function WorkspaceProvider({
       createTask,
       updateTask,
       deleteTask,
-      createMember,
       updateMember,
       deleteMember,
+      invitations,
+      inviteMember,
+      revokeInvitation,
+      acceptInvitation,
       assignMemberToProject,
       removeMemberFromProject,
       getProjectProgress,

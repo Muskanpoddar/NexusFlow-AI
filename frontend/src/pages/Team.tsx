@@ -9,6 +9,8 @@ import {
   LayoutGrid,
   List,
   BriefcaseBusiness,
+  Mail,
+  X,
 } from "lucide-react";
 
 import { useWorkspace } from "../hooks/useWorkspace";
@@ -20,6 +22,7 @@ import MemberModal, {
   type MemberRole,
 } from "../features/team/MemberModal";
 
+import InviteModal from "../features/team/InviteModal";
 import MemberCard from "../features/team/MemberCard";
 
 type TeamView = "all" | "projects" | "unassigned";
@@ -33,17 +36,31 @@ const PROJECT_COLORS = [
   "#8b5cf6",
 ];
 
+function expiryDate(value: string): string {
+  const date = new Date(value);
+
+  return Number.isNaN(date.getTime())
+    ? ""
+    : date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+      });
+}
+
 function Team() {
   const {
     members,
     projects,
     loading,
     error,
-    createMember,
     updateMember,
     deleteMember,
     assignMemberToProject,
     removeMemberFromProject,
+    invitations,
+    inviteMember,
+    revokeInvitation,
+    currentWorkspace,
   } = useWorkspace();
 
   const [activeView, setActiveView] = useState<TeamView>("all");
@@ -53,8 +70,11 @@ function Team() {
   const [layout, setLayout] = useState<"grid" | "list">("grid");
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
-  const [initialProjectIds, setInitialProjectIds] = useState<string[]>([]);
+  const [assignSelection, setAssignSelection] = useState<
+    Record<string, string>
+  >({});
   const [serverError, setServerError] = useState("");
   const [pageError, setPageError] = useState("");
 
@@ -114,16 +134,8 @@ function Team() {
 
   const totalUnassigned = teamMembers.length - totalAssigned;
 
-  const openAddModal = (projectIds: string[] = []) => {
-    setEditingMember(null);
-    setInitialProjectIds(projectIds);
-    setServerError("");
-    setModalOpen(true);
-  };
-
   const openEditModal = (member: TeamMember) => {
     setEditingMember(member);
-    setInitialProjectIds([]);
     setServerError("");
     setModalOpen(true);
   };
@@ -133,38 +145,28 @@ function Team() {
   ) => {
     setServerError("");
 
+    if (!editingMember) return;
+
     try {
-      if (editingMember) {
-        await updateMember(editingMember.id, { role: data.role });
+      await updateMember(editingMember.id, { role: data.role });
 
-        // A project owner can never be detached from their own project.
-        const ownedProjectIds = projects
-          .filter((project) => project.ownerId === editingMember.id)
-          .map((project) => project.id);
+      // A project owner can never be detached from their own project.
+      const ownedProjectIds = projects
+        .filter((project) => project.ownerId === editingMember.id)
+        .map((project) => project.id);
 
-        for (const projectId of data.projectIds) {
-          if (!editingMember.projectIds.includes(projectId)) {
-            await assignMemberToProject(projectId, editingMember.id);
-          }
+      for (const projectId of data.projectIds) {
+        if (!editingMember.projectIds.includes(projectId)) {
+          await assignMemberToProject(projectId, editingMember.id);
         }
+      }
 
-        for (const projectId of editingMember.projectIds) {
-          if (
-            !data.projectIds.includes(projectId) &&
-            !ownedProjectIds.includes(projectId)
-          ) {
-            await removeMemberFromProject(projectId, editingMember.id);
-          }
-        }
-      } else {
-        const userId = await createMember({
-          name: data.name,
-          email: data.email,
-          role: data.role,
-        });
-
-        for (const projectId of data.projectIds) {
-          await assignMemberToProject(projectId, userId);
+      for (const projectId of editingMember.projectIds) {
+        if (
+          !data.projectIds.includes(projectId) &&
+          !ownedProjectIds.includes(projectId)
+        ) {
+          await removeMemberFromProject(projectId, editingMember.id);
         }
       }
 
@@ -175,6 +177,54 @@ function Team() {
         caught instanceof Error
           ? caught.message
           : "The member could not be saved."
+      );
+    }
+  };
+
+  const handleInvite = async (email: string, role: MemberRole) => {
+    setPageError("");
+
+    try {
+      return await inviteMember(email, role);
+    } catch (caught) {
+      throw new Error(
+        caught instanceof Error
+          ? caught.message
+          : "The invitation could not be sent."
+      );
+    }
+  };
+
+  const handleRevoke = async (invitationId: string) => {
+    setPageError("");
+
+    try {
+      await revokeInvitation(invitationId);
+    } catch (caught) {
+      setPageError(
+        caught instanceof Error
+          ? caught.message
+          : "The invitation could not be revoked."
+      );
+    }
+  };
+
+  const handleAssign = async (projectId: string) => {
+    const memberId = assignSelection[projectId];
+
+    if (!memberId) return;
+
+    setPageError("");
+
+    try {
+      await assignMemberToProject(projectId, memberId);
+
+      setAssignSelection((current) => ({ ...current, [projectId]: "" }));
+    } catch (caught) {
+      setPageError(
+        caught instanceof Error
+          ? caught.message
+          : "The member could not be assigned."
       );
     }
   };
@@ -271,11 +321,11 @@ function Team() {
 
         <button
           type="button"
-          onClick={() => openAddModal()}
+          onClick={() => setInviteOpen(true)}
           className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-indigo-700 hover:shadow-md active:translate-y-0"
         >
           <UserPlus size={17} />
-          Add member
+          Invite member
         </button>
       </div>
 
@@ -345,6 +395,56 @@ function Team() {
           );
         })}
       </div>
+
+      {/* Pending invitations */}
+      {invitations.length > 0 && (
+        <div className="animate-slide-up rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 font-semibold text-slate-900">
+              <Mail size={17} className="text-indigo-600" />
+              Pending invitations
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium tabular-nums text-slate-500">
+                {invitations.length}
+              </span>
+            </h2>
+
+            <p className="text-xs text-slate-400">
+              These people have not joined the workspace yet.
+            </p>
+          </div>
+
+          <ul className="mt-4 divide-y divide-slate-100">
+            {invitations.map((invitation) => (
+              <li
+                key={invitation.id}
+                className="flex items-center justify-between gap-3 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-slate-800">
+                    {invitation.email}
+                  </p>
+
+                  <p className="text-xs text-slate-400">
+                    {formatRole(invitation.role)}
+                    {expiryDate(invitation.expiresAt)
+                      ? ` · expires ${expiryDate(invitation.expiresAt)}`
+                      : ""}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRevoke(invitation.id)}
+                  className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                >
+                  <X size={13} />
+                  Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="animate-slide-up overflow-hidden rounded-2xl border border-slate-200 bg-white" style={{ animationDelay: "260ms" }}>
@@ -515,14 +615,42 @@ function Team() {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => openAddModal([project.id])}
-                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition-all duration-200 hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600"
-                    >
-                      <UserPlus size={14} />
-                      Add member
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={assignSelection[project.id] ?? ""}
+                        onChange={(event) =>
+                          setAssignSelection((current) => ({
+                            ...current,
+                            [project.id]: event.target.value,
+                          }))
+                        }
+                        aria-label={`Assign a member to ${project.name}`}
+                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-indigo-500"
+                      >
+                        <option value="">Assign member...</option>
+
+                        {teamMembers
+                          .filter(
+                            (member) =>
+                              !member.projectIds.includes(project.id)
+                          )
+                          .map((member) => (
+                            <option key={member.id} value={member.id}>
+                              {member.name}
+                            </option>
+                          ))}
+                      </select>
+
+                      <button
+                        type="button"
+                        onClick={() => handleAssign(project.id)}
+                        disabled={!assignSelection[project.id]}
+                        className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition-all duration-200 hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <UserPlus size={14} />
+                        Assign
+                      </button>
+                    </div>
                   </div>
 
                   <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -594,11 +722,10 @@ function Team() {
         )}
       </div>
 
-      {modalOpen && (
+      {modalOpen && editingMember && (
         <MemberModal
           member={editingMember}
           projects={teamProjects}
-          initialProjectIds={initialProjectIds}
           serverError={serverError}
           onClose={() => {
             setModalOpen(false);
@@ -606,6 +733,14 @@ function Team() {
             setServerError("");
           }}
           onSave={handleSaveMember}
+        />
+      )}
+
+      {inviteOpen && (
+        <InviteModal
+          allowAdmin={currentWorkspace?.role === "OWNER"}
+          onClose={() => setInviteOpen(false)}
+          onInvite={handleInvite}
         />
       )}
     </div>

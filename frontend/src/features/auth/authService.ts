@@ -63,15 +63,20 @@ export async function registerUser(input: {
   const data = await apiRequest<{
     user: AuthUser;
     workspace?: AuthProfile["workspaces"][number]["workspace"];
+    workspaces?: AuthProfile["workspaces"];
     accessToken: string;
   }>("/api/auth/register", { method: "POST", body: input });
 
   return {
     user: data.user,
     accessToken: data.accessToken,
-    workspaces: data.workspace
-      ? [{ role: "OWNER", workspace: data.workspace }]
-      : [],
+    // A pending invitation joins the account to another workspace, so the
+    // whole membership list is used.
+    workspaces:
+      data.workspaces ??
+      (data.workspace
+        ? [{ role: "OWNER", workspace: data.workspace }]
+        : []),
   };
 }
 

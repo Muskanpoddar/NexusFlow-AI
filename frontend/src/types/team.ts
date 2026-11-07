@@ -9,3 +9,11 @@ export interface TeamMember {
   role: MemberRole;
   joinedAt: string;
 }
+
+export interface WorkspaceInvitation {
+  id: string;
+  email: string;
+  role: MemberRole;
+  expiresAt: string;
+  createdAt: string;
+}

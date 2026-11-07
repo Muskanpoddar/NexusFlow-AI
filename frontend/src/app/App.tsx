@@ -17,6 +17,7 @@ import Settings from "../pages/Settings";
 import HelpSupport from "../pages/HelpSupport";
 
 import AIAssistant from "../features/ai-assistant/AIAssistant";
+import AcceptInvite, { InviteLanding } from "../features/auth/AcceptInvite";
 import AuthLayout from "../features/auth/AuthLayout";
 import ResetPassword from "../features/auth/ResetPassword";
 
@@ -26,14 +27,16 @@ import AppProviders from "./providers";
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
 
+  const search = new URLSearchParams(window.location.search);
+  const resetToken = search.get("resetToken");
+  const inviteToken = search.get("inviteToken");
+
   const [activePage, setActivePage] = useState("Overview");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null
   );
-  const [authView, setAuthView] = useState<"login" | "register">("login");
-
-  const resetToken = new URLSearchParams(window.location.search).get(
-    "resetToken"
+  const [authView, setAuthView] = useState<"invite" | "login" | "register">(
+    inviteToken ? "invite" : "login"
   );
 
   function clearResetToken() {
@@ -85,12 +88,40 @@ function AppContent() {
   }
 
   if (!isAuthenticated) {
+    if (authView === "invite") {
+      return (
+        <AuthLayout
+          title="You have been invited"
+          subtitle="Join the workspace with a NexusFlow account."
+        >
+          <InviteLanding
+            onRegister={() => setAuthView("register")}
+            onLogin={() => setAuthView("login")}
+          />
+        </AuthLayout>
+      );
+    }
+
     return authView === "login" ? (
       <LoginPage
         onSwitchToRegister={() => setAuthView("register")}
       />
     ) : (
       <RegisterPage onSwitchToLogin={() => setAuthView("login")} />
+    );
+  }
+
+  if (inviteToken) {
+    return (
+      <AuthLayout
+        title="Joining the workspace"
+        subtitle="Your invitation is being accepted."
+      >
+        <AcceptInvite
+          token={inviteToken}
+          onAccepted={clearResetToken}
+        />
+      </AuthLayout>
     );
   }
 
