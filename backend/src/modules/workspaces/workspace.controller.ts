@@ -3,6 +3,8 @@ import {
   createWorkspaceSchema,
   addWorkspaceMemberSchema,
   updateWorkspaceMemberSchema,
+  createWorkspaceInvitationSchema,
+  acceptWorkspaceInvitationSchema,
 } from "./workspace.validation.js";
 
 import {
@@ -12,6 +14,10 @@ import {
   addWorkspaceMember,
   updateWorkspaceMemberRole,
   removeWorkspaceMember,
+  createWorkspaceInvitation,
+  listWorkspaceInvitations,
+  revokeWorkspaceInvitation,
+  acceptWorkspaceInvitation,
   WorkspaceError,
 } from "./workspace.service.js";
 
@@ -275,6 +281,172 @@ if (!workspaceId) {
     return res.status(200).json({
       success: true,
       message: "Member removed successfully",
+      data: result,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function createWorkspaceInvitationHandler(
+  req: Request,
+  res: Response
+) {
+  try {
+    const actorId = req.auth?.userId;
+    const workspaceId = getRouteParam(req.params.workspaceId);
+
+    if (!actorId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    if (!workspaceId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid workspace ID",
+      });
+    }
+
+    const validation = createWorkspaceInvitationSchema.safeParse(
+      req.body
+    );
+
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invitation data",
+        errors: validation.error.issues,
+      });
+    }
+
+    const invitation = await createWorkspaceInvitation(
+      workspaceId,
+      actorId,
+      validation.data
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: "Invitation sent successfully",
+      data: invitation,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function listWorkspaceInvitationsHandler(
+  req: Request,
+  res: Response
+) {
+  try {
+    const actorId = req.auth?.userId;
+    const workspaceId = getRouteParam(req.params.workspaceId);
+
+    if (!actorId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    if (!workspaceId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid workspace ID",
+      });
+    }
+
+    const invitations = await listWorkspaceInvitations(
+      workspaceId,
+      actorId
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: invitations,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function revokeWorkspaceInvitationHandler(
+  req: Request,
+  res: Response
+) {
+  try {
+    const actorId = req.auth?.userId;
+    const workspaceId = getRouteParam(req.params.workspaceId);
+    const invitationId = getRouteParam(req.params.invitationId);
+
+    if (!actorId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    if (!workspaceId || !invitationId) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid workspace or invitation ID",
+      });
+    }
+
+    const result = await revokeWorkspaceInvitation(
+      workspaceId,
+      invitationId,
+      actorId
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Invitation revoked successfully",
+      data: result,
+    });
+  } catch (error) {
+    return handleError(res, error);
+  }
+}
+
+export async function acceptWorkspaceInvitationHandler(
+  req: Request,
+  res: Response
+) {
+  try {
+    const userId = req.auth?.userId;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const validation = acceptWorkspaceInvitationSchema.safeParse(
+      req.body
+    );
+
+    if (!validation.success) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invitation token",
+        errors: validation.error.issues,
+      });
+    }
+
+    const result = await acceptWorkspaceInvitation(
+      validation.data.token,
+      userId
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Invitation accepted successfully",
       data: result,
     });
   } catch (error) {

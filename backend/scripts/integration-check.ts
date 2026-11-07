@@ -34,24 +34,30 @@ const provider = createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        choices: [
+        id: "msg_stub",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-5-5",
+        content: [
           {
-            message: {
-              content: JSON.stringify({
-                intent: "project-health",
-                headline: "One project needs attention",
-                narrative: "The integration project is behind its deadline.",
-                sections: [
-                  {
-                    heading: "Risks",
-                    bullets: ["Integration project is overdue"],
-                  },
-                ],
-                followUps: ["Which tasks are overdue?"],
-              }),
-            },
+            type: "text",
+            text: JSON.stringify({
+              intent: "project-health",
+              headline: "One project needs attention",
+              narrative: "The integration project is behind its deadline.",
+              sections: [
+                {
+                  heading: "Risks",
+                  bullets: ["Integration project is overdue"],
+                },
+              ],
+              followUps: ["Which tasks are overdue?"],
+            }),
           },
         ],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 100, output_tokens: 50 },
       })
     );
   });
@@ -89,8 +95,8 @@ await new Promise<void>((resolve) =>
 
 const mailerPort = (mailer.address() as AddressInfo).port;
 
-process.env.MINIMAX_API_KEY = "integration-test-key";
-process.env.MINIMAX_API_URL = `http://127.0.0.1:${providerPort}/v1`;
+process.env.ANTHROPIC_API_KEY = "integration-test-key";
+process.env.ANTHROPIC_API_URL = `http://127.0.0.1:${providerPort}`;
 
 const api = createServer(app);
 
@@ -131,14 +137,27 @@ let workspaceId = "";
 let projectId = "";
 let taskId = "";
 let teammateId = "";
+let teammateToken = "";
 let ownerId = "";
 let teammateWorkspaceId = "";
 let strangerId = "";
 let strangerWorkspaceId = "";
 let extraWorkspaceId = "";
+let inviteeId = "";
+let inviteeWorkspaceId = "";
+let acceptorId = "";
+let acceptorWorkspaceId = "";
 
 function check(name: string, run: () => Promise<void>) {
   checks.push({ name, run });
+}
+
+function inviteTokenFrom(link: string): string {
+  const token = new URL(link).searchParams.get("inviteToken");
+
+  assert.ok(token, "the invite link carries a token");
+
+  return token;
 }
 
 check("registration creates an account, a workspace and a token", async () => {
@@ -166,6 +185,7 @@ check("registration creates an account, a workspace and a token", async () => {
 
   teammateId = second.body.data!.user.id;
   teammateWorkspaceId = second.body.data!.workspace.id;
+  teammateToken = second.body.data!.accessToken;
 });
 
 check("login returns the memberships of the user", async () => {
@@ -472,6 +492,197 @@ check("workspace members can be invited, promoted and removed", async () => {
   assert.equal(promoted.body.data!.role, "MANAGER");
 });
 
+check("an invitation reaches an address without an account", async () => {
+  const inviteeEmail = `invitee-${suffix}@example.com`;
+
+  const invited = await call<{
+    id: string;
+    email: string;
+    inviteLink: string;
+  }>(`/api/workspaces/${workspaceId}/invitations`, {
+    method: "POST",
+    token: ownerToken,
+    body: { email: inviteeEmail, role: "MEMBER" },
+  });
+
+  assert.equal(invited.status, 201);
+  assert.equal(invited.body.data!.email, inviteeEmail);
+
+  const inviteToken = inviteTokenFrom(invited.body.data!.inviteLink);
+
+  const listed = await call<{ email: string }[]>(
+    `/api/workspaces/${workspaceId}/invitations`,
+    { token: ownerToken }
+  );
+
+  assert.equal(listed.status, 200);
+  assert.ok(listed.body.data!.some((entry) => entry.email === inviteeEmail));
+
+  const alreadyMember = await call(`/api/workspaces/${workspaceId}/invitations`, {
+    method: "POST",
+    token: ownerToken,
+    body: { email: teammate.email, role: "MEMBER" },
+  });
+
+  assert.equal(alreadyMember.status, 409);
+
+  // the invitee signs up with that address and lands in the workspace
+  const registered = await call<{
+    user: { id: string };
+    workspace: { id: string };
+    accessToken: string;
+    workspaces: { workspace: { id: string } }[];
+  }>("/api/auth/register", {
+    method: "POST",
+    body: {
+      name: "Integration Invitee",
+      email: inviteeEmail,
+      password: "InviteePass123",
+    },
+  });
+
+  assert.equal(registered.status, 201);
+  assert.ok(
+    registered.body.data!.workspaces.some(
+      (entry) => entry.workspace.id === workspaceId
+    )
+  );
+
+  inviteeId = registered.body.data!.user.id;
+  inviteeWorkspaceId = registered.body.data!.workspace.id;
+
+  // the invitation is used up, accepting it again keeps the membership
+  const again = await call<{ membership: { role: string } }>(
+    "/api/workspaces/invitations/accept",
+    {
+      method: "POST",
+      token: registered.body.data!.accessToken,
+      body: { token: inviteToken },
+    }
+  );
+
+  assert.equal(again.status, 200);
+  assert.equal(again.body.data!.membership.role, "MEMBER");
+
+  // a plain member cannot invite anyone
+  const notAllowed = await call(`/api/workspaces/${workspaceId}/invitations`, {
+    method: "POST",
+    token: registered.body.data!.accessToken,
+    body: { email: `guest-${suffix}@example.com`, role: "MEMBER" },
+  });
+
+  assert.equal(notAllowed.status, 403);
+});
+
+check("an invited member can accept the link with their own account", async () => {
+  const acceptorEmail = `acceptor-${suffix}@example.com`;
+
+  const registered = await call<{
+    user: { id: string };
+    workspace: { id: string };
+    accessToken: string;
+  }>("/api/auth/register", {
+    method: "POST",
+    body: {
+      name: "Integration Acceptor",
+      email: acceptorEmail,
+      password: "AcceptorPass123",
+    },
+  });
+
+  assert.equal(registered.status, 201);
+
+  acceptorId = registered.body.data!.user.id;
+  acceptorWorkspaceId = registered.body.data!.workspace.id;
+
+  const invited = await call<{ inviteLink: string }>(
+    `/api/workspaces/${workspaceId}/invitations`,
+    {
+      method: "POST",
+      token: ownerToken,
+      body: { email: acceptorEmail, role: "MANAGER" },
+    }
+  );
+
+  assert.equal(invited.status, 201);
+
+  const token = inviteTokenFrom(invited.body.data!.inviteLink);
+
+  const wrongAccount = await call("/api/workspaces/invitations/accept", {
+    method: "POST",
+    token: teammateToken,
+    body: { token },
+  });
+
+  assert.equal(wrongAccount.status, 403);
+
+  const accepted = await call<{ membership: { role: string } }>(
+    "/api/workspaces/invitations/accept",
+    {
+      method: "POST",
+      token: registered.body.data!.accessToken,
+      body: { token },
+    }
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.body.data!.membership.role, "MANAGER");
+
+  const reused = await call("/api/workspaces/invitations/accept", {
+    method: "POST",
+    token: registered.body.data!.accessToken,
+    body: { token },
+  });
+
+  assert.equal(reused.status, 200);
+
+  const unknownToken = await call("/api/workspaces/invitations/accept", {
+    method: "POST",
+    token: registered.body.data!.accessToken,
+    body: { token: "not-a-real-token" },
+  });
+
+  assert.equal(unknownToken.status, 400);
+});
+
+check("an invitation can be revoked", async () => {
+  const email = `revoked-${suffix}@example.com`;
+
+  const invited = await call<{ id: string; inviteLink: string }>(
+    `/api/workspaces/${workspaceId}/invitations`,
+    {
+      method: "POST",
+      token: ownerToken,
+      body: { email, role: "MEMBER" },
+    }
+  );
+
+  assert.equal(invited.status, 201);
+
+  const revoked = await call(
+    `/api/workspaces/${workspaceId}/invitations/${invited.body.data!.id}`,
+    { method: "DELETE", token: ownerToken }
+  );
+
+  assert.equal(revoked.status, 200);
+
+  const listed = await call<{ email: string }[]>(
+    `/api/workspaces/${workspaceId}/invitations`,
+    { token: ownerToken }
+  );
+
+  assert.ok(!listed.body.data!.some((entry) => entry.email === email));
+
+  // the link of a revoked invitation does not work anymore
+  const used = await call("/api/workspaces/invitations/accept", {
+    method: "POST",
+    token: ownerToken,
+    body: { token: inviteTokenFrom(invited.body.data!.inviteLink) },
+  });
+
+  assert.equal(used.status, 400);
+});
+
 check("a member can be attached to and detached from a project", async () => {
   const added = await call(
     `/api/projects/workspaces/${workspaceId}/${projectId}/members`,
@@ -579,9 +790,9 @@ check("the assistant answers with the workspace context and stores the chat", as
 });
 
 check("the assistant answers from the workspace context without a provider key", async () => {
-  const providerKey = process.env.MINIMAX_API_KEY;
+  const providerKey = process.env.ANTHROPIC_API_KEY;
 
-  delete process.env.MINIMAX_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
 
   try {
     const answer = await call<{
@@ -609,7 +820,7 @@ check("the assistant answers from the workspace context without a provider key",
 
     assert.equal(conversations.body.data!.length, 2);
   } finally {
-    process.env.MINIMAX_API_KEY = providerKey;
+    process.env.ANTHROPIC_API_KEY = providerKey;
   }
 });
 
@@ -675,46 +886,53 @@ check("a member can be removed from the workspace", async () => {
     { token: ownerToken }
   );
 
-  assert.equal(members.body.data!.length, 1);
+  // the owner, the invitee and the acceptor are left
+  assert.equal(members.body.data!.length, 3);
 });
 
 let failed = 0;
 
-for (const item of checks) {
-  try {
-    await item.run();
+try {
+  for (const item of checks) {
+    try {
+      await item.run();
 
-    console.log(`  ok  ${item.name}`);
-  } catch (error) {
-    failed += 1;
+      console.log(`  ok  ${item.name}`);
+    } catch (error) {
+      failed += 1;
 
-    console.error(`FAIL  ${item.name}`);
-    console.error(`      ${(error as Error).message.split("\n")[0]}`);
+      console.error(`FAIL  ${item.name}`);
+      console.error(`      ${(error as Error).message.split("\n")[0]}`);
+    }
   }
-}
-
-// Clean up exactly the rows this run created.
-await prisma.workspace.deleteMany({
-  where: {
-    id: {
-      in: [
-        workspaceId,
-        teammateWorkspaceId,
-        strangerWorkspaceId,
-        extraWorkspaceId,
-      ],
+} finally {
+  // Clean up exactly the rows this run created, even when a check crashed.
+  await prisma.workspace.deleteMany({
+    where: {
+      id: {
+        in: [
+          workspaceId,
+          teammateWorkspaceId,
+          strangerWorkspaceId,
+          extraWorkspaceId,
+          inviteeWorkspaceId,
+          acceptorWorkspaceId,
+        ],
+      },
     },
-  },
-});
+  });
 
-await prisma.user.deleteMany({
-  where: { id: { in: [ownerId, teammateId, strangerId] } },
-});
+  await prisma.user.deleteMany({
+    where: {
+      id: { in: [ownerId, teammateId, strangerId, inviteeId, acceptorId] },
+    },
+  });
 
-await new Promise<void>((resolve) => api.close(() => resolve()));
-await new Promise<void>((resolve) => provider.close(() => resolve()));
-await new Promise<void>((resolve) => mailer.close(() => resolve()));
-await prisma.$disconnect();
+  await new Promise<void>((resolve) => api.close(() => resolve()));
+  await new Promise<void>((resolve) => provider.close(() => resolve()));
+  await new Promise<void>((resolve) => mailer.close(() => resolve()));
+  await prisma.$disconnect();
+}
 
 console.log(`\n${checks.length - failed}/${checks.length} checks passed`);
 

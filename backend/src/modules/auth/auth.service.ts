@@ -1,8 +1,10 @@
 import "dotenv/config";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import jwt, { type SignOptions } from "jsonwebtoken";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
+import { sendEmail } from "../../lib/mailer.js";
+import { frontendUrl } from "../../lib/links.js";
 import type {
   ChangePasswordInput,
   ForgotPasswordInput,
@@ -24,7 +26,8 @@ function getJwtSecret(): string {
 
 const JWT_SECRET = getJwtSecret();
 
-const ACCESS_TOKEN_EXPIRY = "15m";
+const ACCESS_TOKEN_EXPIRY = (process.env.JWT_EXPIRES_IN ??
+  "15m") as SignOptions["expiresIn"];
 
 const RESET_TOKEN_TTL_MINUTES = Number(
   process.env.PASSWORD_RESET_TOKEN_TTL_MINUTES ?? 30
@@ -34,43 +37,14 @@ function hashResetToken(token: string) {
   return createHash("sha256").update(token).digest("hex");
 }
 
-// Sends the reset link through the Resend HTTP API. Returns false when no
+// Sends the reset link through the shared mailer. Returns false when no
 // mailer is configured so the caller can fall back to the server log.
 async function sendResetEmail(to: string, link: string): Promise<boolean> {
-  const apiKey = process.env.RESEND_API_KEY;
-
-  if (!apiKey) return false;
-
-  try {
-    const response = await fetch(
-      process.env.RESEND_API_URL ?? "https://api.resend.com/emails",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          from:
-            process.env.RESEND_FROM ??
-            "NexusFlow <onboarding@resend.dev>",
-          to: [to],
-          subject: "Reset your NexusFlow password",
-          html: `<p>Use the link below to choose a new NexusFlow password.</p><p><a href="${link}">Reset my password</a></p><p>The link works once and expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>`,
-        }),
-      }
-    );
-
-    if (!response.ok) {
-      console.error("Password reset email failed:", response.status);
-      return false;
-    }
-
-    return true;
-  } catch (error) {
-    console.error("Password reset email failed:", error);
-    return false;
-  }
+  return sendEmail(
+    to,
+    "Reset your NexusFlow password",
+    `<p>Use the link below to choose a new NexusFlow password.</p><p><a href="${link}">Reset my password</a></p><p>The link works once and expires in ${RESET_TOKEN_TTL_MINUTES} minutes.</p>`
+  );
 }
 
 function createAccessToken(user: { id: string; email: string }) {
@@ -131,8 +105,57 @@ export async function registerUser(input: RegisterInput) {
     return { user, workspace };
   });
 
+  // An open invitation for this address is used up right away, so a new
+  // account lands in the workspace that invited it.
+  const invitation = await prisma.workspaceInvitation.findFirst({
+    where: { email, acceptedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, workspaceId: true, role: true },
+  });
+
+  if (invitation) {
+    await prisma.$transaction([
+      prisma.workspaceMember.upsert({
+        where: {
+          workspaceId_userId: {
+            workspaceId: invitation.workspaceId,
+            userId: result.user.id,
+          },
+        },
+        update: {},
+        create: {
+          workspaceId: invitation.workspaceId,
+          userId: result.user.id,
+          role: invitation.role,
+        },
+      }),
+      prisma.workspaceInvitation.update({
+        where: { id: invitation.id },
+        data: { acceptedAt: new Date() },
+      }),
+    ]);
+  }
+
+  const workspaces = await prisma.workspaceMember.findMany({
+    where: { userId: result.user.id },
+    select: {
+      role: true,
+      workspace: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+    orderBy: { joinedAt: "asc" },
+  });
+
   return {
     ...result,
+    workspaces,
     accessToken: createAccessToken(result.user),
     tokenType: "Bearer",
     expiresIn: ACCESS_TOKEN_EXPIRY,
@@ -272,11 +295,7 @@ export async function requestPasswordReset(input: ForgotPasswordInput) {
     }),
   ]);
 
-  const frontendUrl = (
-    process.env.FRONTEND_URL ?? "http://localhost:5173"
-  ).replace(/\/$/, "");
-
-  const link = `${frontendUrl}/?resetToken=${token}`;
+  const link = `${frontendUrl()}/?resetToken=${token}`;
 
   if (!(await sendResetEmail(user.email, link))) {
     // shortcut: no mailer is configured, so the link goes to the server log.

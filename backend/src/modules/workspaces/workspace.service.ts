@@ -1,11 +1,14 @@
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash, randomBytes } from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
+import { sendEmail } from "../../lib/mailer.js";
+import { frontendUrl } from "../../lib/links.js";
 import { createActivity } from "../activity/activity.service.js";
 import type {
   CreateWorkspaceInput,
   AddWorkspaceMemberInput,
   UpdateWorkspaceMemberInput,
+  CreateWorkspaceInvitationInput,
 } from "./workspace.validation.js";
 
 type WorkspaceRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER";
@@ -347,4 +350,262 @@ export async function removeWorkspaceMember(
   });
 
   return { userId: targetUserId };
+}
+
+const INVITATION_TTL_HOURS = Number(
+  process.env.INVITATION_TTL_HOURS ?? 72
+);
+
+function hashInvitationToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+export async function createWorkspaceInvitation(
+  workspaceId: string,
+  actorId: string,
+  input: CreateWorkspaceInvitationInput
+) {
+  const actorRole = await requireWorkspaceManager(workspaceId, actorId);
+
+  if (input.role === "ADMIN" && actorRole !== "OWNER") {
+    throw new WorkspaceError(
+      "Only the workspace owner can assign the ADMIN role",
+      403
+    );
+  }
+
+  const email = input.email.toLowerCase();
+
+  const existingMember = await prisma.workspaceMember.findFirst({
+    where: { workspaceId, user: { email } },
+    select: { id: true },
+  });
+
+  if (existingMember) {
+    throw new WorkspaceError(
+      "This person is already a workspace member",
+      409
+    );
+  }
+
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { id: true, name: true },
+  });
+
+  if (!workspace) {
+    throw new WorkspaceError("Workspace not found", 404);
+  }
+
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(
+    Date.now() + INVITATION_TTL_HOURS * 3_600_000
+  );
+
+  // One open invitation per address, so a fresh invite replaces the old link.
+  const invitation = await prisma.workspaceInvitation.upsert({
+    where: { workspaceId_email: { workspaceId, email } },
+    update: {
+      role: input.role,
+      tokenHash: hashInvitationToken(token),
+      expiresAt,
+      acceptedAt: null,
+      invitedById: actorId,
+    },
+    create: {
+      workspaceId,
+      email,
+      role: input.role,
+      tokenHash: hashInvitationToken(token),
+      expiresAt,
+      invitedById: actorId,
+    },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+  });
+
+  const link = `${frontendUrl()}/?inviteToken=${token}`;
+
+  const sent = await sendEmail(
+    email,
+    `You are invited to join ${workspace.name}`,
+    `<p>You have been invited to join the workspace <strong>${workspace.name}</strong> on NexusFlow.</p><p><a href="${link}">Accept the invitation</a></p><p>The link works once and expires in ${INVITATION_TTL_HOURS} hours. If you have no account yet, create one with this email address first.</p>`
+  );
+
+  if (!sent) {
+    // shortcut: no mailer is configured, so the link goes to the server log
+    console.log(`[invitations] Invite link for ${email}: ${link}`);
+  }
+
+  await createActivity({
+    workspaceId,
+    actorId,
+    type: "WORKSPACE_INVITATION_SENT",
+    entityType: "WORKSPACE",
+    entityId: workspaceId,
+    description: `invited ${email} to the workspace`,
+  });
+
+  return { ...invitation, inviteLink: link, emailed: sent };
+}
+
+export async function listWorkspaceInvitations(
+  workspaceId: string,
+  actorId: string
+) {
+  await requireWorkspaceManager(workspaceId, actorId);
+
+  return prisma.workspaceInvitation.findMany({
+    where: { workspaceId, acceptedAt: null },
+    select: {
+      id: true,
+      email: true,
+      role: true,
+      expiresAt: true,
+      createdAt: true,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+export async function revokeWorkspaceInvitation(
+  workspaceId: string,
+  invitationId: string,
+  actorId: string
+) {
+  await requireWorkspaceManager(workspaceId, actorId);
+
+  const removed = await prisma.workspaceInvitation.deleteMany({
+    where: { id: invitationId, workspaceId },
+  });
+
+  if (removed.count === 0) {
+    throw new WorkspaceError("Invitation not found", 404);
+  }
+
+  return { revoked: true };
+}
+
+export async function acceptWorkspaceInvitation(
+  token: string,
+  userId: string
+) {
+  const invitation = await prisma.workspaceInvitation.findUnique({
+    where: { tokenHash: hashInvitationToken(token) },
+    select: {
+      id: true,
+      workspaceId: true,
+      email: true,
+      role: true,
+      expiresAt: true,
+      acceptedAt: true,
+      workspace: { select: { id: true, name: true } },
+    },
+  });
+
+  if (!invitation) {
+    throw new WorkspaceError(
+      "This invitation is invalid or has expired",
+      400
+    );
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true },
+  });
+
+  if (!user || user.email.toLowerCase() !== invitation.email) {
+    throw new WorkspaceError(
+      "This invitation was sent to a different email address",
+      403
+    );
+  }
+
+  if (invitation.acceptedAt) {
+    // The invitation was already used, for example while the account was
+    // created. The membership is still there.
+    const membership = await prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: invitation.workspaceId,
+          userId,
+        },
+      },
+      select: {
+        id: true,
+        role: true,
+        joinedAt: true,
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    if (!membership) {
+      throw new WorkspaceError(
+        "This invitation is invalid or has expired",
+        400
+      );
+    }
+
+    return {
+      membership,
+      workspace: invitation.workspace,
+    };
+  }
+
+  if (invitation.expiresAt < new Date()) {
+    throw new WorkspaceError(
+      "This invitation is invalid or has expired",
+      400
+    );
+  }
+
+  const membership = await prisma.workspaceMember.upsert({
+    where: {
+      workspaceId_userId: {
+        workspaceId: invitation.workspaceId,
+        userId,
+      },
+    },
+    update: {},
+    create: {
+      workspaceId: invitation.workspaceId,
+      userId,
+      role: invitation.role,
+    },
+    select: {
+      id: true,
+      role: true,
+      joinedAt: true,
+      user: {
+        select: { id: true, name: true, email: true },
+      },
+    },
+  });
+
+  await prisma.workspaceInvitation.update({
+    where: { id: invitation.id },
+    data: { acceptedAt: new Date() },
+  });
+
+  await createActivity({
+    workspaceId: invitation.workspaceId,
+    actorId: userId,
+    type: "WORKSPACE_MEMBER_ADDED",
+    entityType: "WORKSPACE",
+    entityId: invitation.workspaceId,
+    description: `joined the workspace from an invitation`,
+  });
+
+  return {
+    membership,
+    workspace: invitation.workspace,
+  };
 }

@@ -13,6 +13,15 @@ export const updateWorkspaceMemberSchema = z.object({
   role: z.enum(["ADMIN", "MANAGER", "MEMBER"]),
 });
 
+export const createWorkspaceInvitationSchema = z.object({
+  email: z.string().trim().email().max(254),
+  role: z.enum(["ADMIN", "MANAGER", "MEMBER"]).default("MEMBER"),
+});
+
+export const acceptWorkspaceInvitationSchema = z.object({
+  token: z.string().trim().min(10).max(200),
+});
+
 export type CreateWorkspaceInput = z.infer<
   typeof createWorkspaceSchema
 >;
@@ -23,4 +32,8 @@ export type AddWorkspaceMemberInput = z.infer<
 
 export type UpdateWorkspaceMemberInput = z.infer<
   typeof updateWorkspaceMemberSchema
+>;
+
+export type CreateWorkspaceInvitationInput = z.infer<
+  typeof createWorkspaceInvitationSchema
 >;

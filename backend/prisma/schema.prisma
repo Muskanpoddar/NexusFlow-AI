@@ -63,6 +63,7 @@ model User {
   activities         Activity[]        @relation("ActivityActor")
   conversations      AIConversation[]
   resetTokens        PasswordResetToken[]
+  sentInvitations    WorkspaceInvitation[] @relation("InvitationInviter")
 
   @@index([email])
 }
@@ -81,6 +82,7 @@ model Workspace {
   tasks         Task[]
   activities    Activity[]
   conversations AIConversation[]
+  invitations   WorkspaceInvitation[]
 
   @@index([createdById])
 }
@@ -97,6 +99,25 @@ model WorkspaceMember {
 
   @@unique([workspaceId, userId])
   @@index([userId])
+}
+
+model WorkspaceInvitation {
+  id          String        @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole @default(MEMBER)
+  tokenHash   String        @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  invitedById String
+  createdAt   DateTime      @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy User     @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([email])
+  @@index([workspaceId])
 }
 
 model Project {
