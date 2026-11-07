@@ -1,8 +1,14 @@
 
 export type ActivityType =
+  | "WORKSPACE_CREATED"
+  | "WORKSPACE_MEMBER_ADDED"
+  | "WORKSPACE_MEMBER_ROLE_UPDATED"
+  | "WORKSPACE_MEMBER_REMOVED"
   | "PROJECT_CREATED"
   | "PROJECT_UPDATED"
   | "PROJECT_DELETED"
+  | "PROJECT_MEMBER_ADDED"
+  | "PROJECT_MEMBER_REMOVED"
   | "TASK_CREATED"
   | "TASK_UPDATED"
   | "TASK_COMPLETED"
@@ -17,6 +23,7 @@ export interface Activity {
   type: ActivityType;
   message: string;
   actorId: string;
+  actorName: string;
   entityId: string;
   createdAt: string;
 }

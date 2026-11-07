@@ -1,5 +1,5 @@
 
-export type MemberRole = "Admin" | "Manager" | "Member";
+export type MemberRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER";
 
 export interface TeamMember {
   id: string;
@@ -7,6 +7,5 @@ export interface TeamMember {
   name: string;
   email: string;
   role: MemberRole;
-  department: string;
   joinedAt: string;
 }

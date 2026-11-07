@@ -8,14 +8,13 @@ import {
   type ReactNode,
 } from "react";
 
+import { useAuth } from "../hooks/useAuth";
+import { apiRequest } from "../services/api/apiClient";
+
 import type { Project } from "../types/project";
 import type { Task } from "../types/task";
-import type { TeamMember } from "../types/team";
-import type { Activity, ActivityType } from "../types/activity";
-
-const STORAGE_KEY = "nexusflow-workspace-v1";
-const WORKSPACE_ID = "workspace-demo";
-const CURRENT_USER_ID = "member-1";
+import type { MemberRole, TeamMember } from "../types/team";
+import type { Activity } from "../types/activity";
 
 export interface WorkspaceData {
   projects: Project[];
@@ -24,36 +23,56 @@ export interface WorkspaceData {
   activities: Activity[];
 }
 
+export interface WorkspaceSummary {
+  id: string;
+  name: string;
+  slug: string;
+  role: string;
+}
+
+type ProjectInput = Omit<Project, "id" | "createdAt" | "workspaceId">;
+type TaskInput = Omit<Task, "id" | "createdAt" | "workspaceId">;
+type MemberInput = Omit<TeamMember, "id" | "joinedAt" | "workspaceId">;
+
 export interface WorkspaceContextValue extends WorkspaceData {
-  createProject: (
-    data: Omit<Project, "id" | "createdAt" | "workspaceId">
-  ) => void;
+  loading: boolean;
+  error: string | null;
+  workspaceId: string | null;
+  workspaces: WorkspaceSummary[];
+  currentWorkspace: WorkspaceSummary | null;
+  switchWorkspace: (id: string) => void;
+  refreshWorkspace: () => Promise<void>;
+  createWorkspace: (name: string) => Promise<string>;
+
+  createProject: (data: ProjectInput) => Promise<void>;
   updateProject: (
     id: string,
     data: Partial<Omit<Project, "id" | "workspaceId">>
-  ) => void;
-  deleteProject: (id: string) => void;
+  ) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
 
-  createTask: (
-    data: Omit<Task, "id" | "createdAt" | "workspaceId">
-  ) => void;
+  createTask: (data: TaskInput) => Promise<void>;
   updateTask: (
     id: string,
     data: Partial<Omit<Task, "id" | "workspaceId">>
-  ) => void;
-  deleteTask: (id: string) => void;
+  ) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
 
-  createMember: (
-    data: Omit<TeamMember, "id" | "joinedAt" | "workspaceId">
-  ) => void;
+  createMember: (data: MemberInput) => Promise<string>;
   updateMember: (
     id: string,
     data: Partial<Omit<TeamMember, "id" | "workspaceId">>
-  ) => void;
-  deleteMember: (id: string) => void;
+  ) => Promise<void>;
+  deleteMember: (id: string) => Promise<void>;
 
-  assignMemberToProject: (projectId: string, memberId: string) => void;
-  removeMemberFromProject: (projectId: string, memberId: string) => void;
+  assignMemberToProject: (
+    projectId: string,
+    memberId: string
+  ) => Promise<void>;
+  removeMemberFromProject: (
+    projectId: string,
+    memberId: string
+  ) => Promise<void>;
 
   getProjectProgress: (projectId: string) => number;
   getProjectTasks: (projectId: string) => Task[];
@@ -64,471 +83,623 @@ export interface WorkspaceContextValue extends WorkspaceData {
 export const WorkspaceContext =
   createContext<WorkspaceContextValue | null>(null);
 
-const initialData: WorkspaceData = {
-  projects: [
-    {
-      id: "project-1",
-      workspaceId: WORKSPACE_ID,
-      name: "NexusFlow Dashboard",
-      description: "Build the core project management dashboard.",
-      status: "Active",
-      priority: "High",
-      ownerId: "member-1",
-      memberIds: ["member-1", "member-2"],
-      category: "Development",
-      startDate: "2026-10-01",
-      dueDate: "2026-12-15",
-      createdAt: "2026-10-01T09:00:00.000Z",
-    },
-    {
-      id: "project-2",
-      workspaceId: WORKSPACE_ID,
-      name: "Mobile App Development",
-      description: "Develop the mobile experience.",
-      status: "Planning",
-      priority: "Medium",
-      ownerId: "member-1",
-      memberIds: ["member-1", "member-3"],
-      category: "Mobile",
-      startDate: "2026-10-15",
-      dueDate: "2027-01-20",
-      createdAt: "2026-10-15T09:00:00.000Z",
-    },
-    {
-      id: "project-3",
-      workspaceId: WORKSPACE_ID,
-      name: "Website Redesign",
-      description: "Refresh the public website experience.",
-      status: "Active",
-      priority: "Medium",
-      ownerId: "member-2",
-      memberIds: ["member-2", "member-4"],
-      category: "Design",
-      startDate: "2026-09-20",
-      dueDate: "2026-12-05",
-      createdAt: "2026-09-20T09:00:00.000Z",
-    },
-    {
-      id: "project-4",
-      workspaceId: WORKSPACE_ID,
-      name: "AI Integration",
-      description: "Integrate AI capabilities into the workspace.",
-      status: "Planning",
-      priority: "High",
-      ownerId: "member-1",
-      memberIds: ["member-1", "member-3"],
-      category: "AI",
-      startDate: "2026-11-01",
-      dueDate: "2027-02-01",
-      createdAt: "2026-11-01T09:00:00.000Z",
-    },
-  ],
-
-  members: [
-    {
-      id: "member-1",
-      workspaceId: WORKSPACE_ID,
-      name: "Muskan Poddar",
-      email: "muskan@example.com",
-      role: "Admin",
-      department: "Engineering",
-      joinedAt: "Jan 2026",
-    },
-    {
-      id: "member-2",
-      workspaceId: WORKSPACE_ID,
-      name: "Komal Sharma",
-      email: "komal@example.com",
-      role: "Manager",
-      department: "Product",
-      joinedAt: "Feb 2026",
-    },
-    {
-      id: "member-3",
-      workspaceId: WORKSPACE_ID,
-      name: "Rahul Kumar",
-      email: "rahul@example.com",
-      role: "Member",
-      department: "Engineering",
-      joinedAt: "Mar 2026",
-    },
-    {
-      id: "member-4",
-      workspaceId: WORKSPACE_ID,
-      name: "Ananya Singh",
-      email: "ananya@example.com",
-      role: "Member",
-      department: "Design",
-      joinedAt: "Mar 2026",
-    },
-  ],
-
-  tasks: [
-    {
-      id: "task-1",
-      workspaceId: WORKSPACE_ID,
-      projectId: "project-1",
-      title: "Design dashboard layout",
-      description: "Create the main dashboard layout and responsive states.",
-      status: "Done",
-      priority: "High",
-      assigneeId: "member-1",
-      dueDate: "2026-11-10",
-      createdAt: "2026-10-05T09:00:00.000Z",
-    },
-    {
-      id: "task-2",
-      workspaceId: WORKSPACE_ID,
-      projectId: "project-1",
-      title: "Implement analytics cards",
-      description: "Build dynamic dashboard metric cards.",
-      status: "In Progress",
-      priority: "High",
-      assigneeId: "member-2",
-      dueDate: "2026-11-15",
-      createdAt: "2026-10-06T09:00:00.000Z",
-    },
-    {
-      id: "task-3",
-      workspaceId: WORKSPACE_ID,
-      projectId: "project-1",
-      title: "Add activity timeline",
-      description: "Display recent workspace activity.",
-      status: "To Do",
-      priority: "Medium",
-      assigneeId: "member-1",
-      dueDate: "2026-11-20",
-      createdAt: "2026-10-07T09:00:00.000Z",
-    },
-    {
-      id: "task-4",
-      workspaceId: WORKSPACE_ID,
-      projectId: "project-2",
-      title: "Define mobile navigation",
-      description: "Plan the navigation structure for mobile.",
-      status: "To Do",
-      priority: "Medium",
-      assigneeId: "member-3",
-      dueDate: "2026-12-01",
-      createdAt: "2026-10-16T09:00:00.000Z",
-    },
-    {
-      id: "task-5",
-      workspaceId: WORKSPACE_ID,
-      projectId: "project-3",
-      title: "Create design system",
-      description: "Define typography, spacing and color tokens.",
-      status: "In Progress",
-      priority: "High",
-      assigneeId: "member-4",
-      dueDate: "2026-11-25",
-      createdAt: "2026-09-22T09:00:00.000Z",
-    },
-  ],
-
+const EMPTY_DATA: WorkspaceData = {
+  projects: [],
+  tasks: [],
+  members: [],
   activities: [],
 };
 
-function makeId() {
-  return crypto.randomUUID();
+const WORKSPACE_STORAGE_KEY = "nexusflow-workspace-id";
+
+type AnyRecord = Record<string, any>;
+
+function asRecord(value: unknown): AnyRecord {
+  return value && typeof value === "object"
+    ? (value as AnyRecord)
+    : {};
 }
 
-function makeActivity(
-  type: ActivityType,
-  message: string,
-  entityId: string
-): Activity {
+function extractArray(value: unknown, keys: string[]): AnyRecord[] {
+  if (Array.isArray(value)) return value;
+
+  const record = asRecord(value);
+
+  for (const key of keys) {
+    if (Array.isArray(record[key])) return record[key];
+  }
+
+  return [];
+}
+
+function dateOnly(value: unknown): string {
+  if (!value) return "";
+
+  const date = new Date(String(value));
+
+  return Number.isNaN(date.getTime())
+    ? String(value).slice(0, 10)
+    : date.toISOString().slice(0, 10);
+}
+
+function formatJoinedAt(value: unknown): string {
+  if (!value) return "";
+
+  const date = new Date(String(value));
+
+  if (Number.isNaN(date.getTime())) return String(value);
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function projectStatus(value: unknown): Project["status"] {
+  const status = String(value ?? "PLANNING").toUpperCase();
+
+  const map: Record<string, Project["status"]> = {
+    PLANNING: "Planning",
+    ACTIVE: "Active",
+    ON_HOLD: "On Hold",
+    COMPLETED: "Completed",
+  };
+
+  return map[status] ?? "Planning";
+}
+
+function taskStatus(value: unknown): Task["status"] {
+  const status = String(value ?? "TODO").toUpperCase();
+
+  const map: Record<string, Task["status"]> = {
+    TODO: "To Do",
+    TO_DO: "To Do",
+    IN_PROGRESS: "In Progress",
+    DONE: "Done",
+  };
+
+  return map[status] ?? "To Do";
+}
+
+function priority(value: unknown): "Low" | "Medium" | "High" {
+  const result = String(value ?? "MEDIUM").toUpperCase();
+
+  if (result === "LOW") return "Low";
+  if (result === "HIGH" || result === "URGENT") return "High";
+
+  return "Medium";
+}
+
+function memberRole(value: unknown): MemberRole {
+  const role = String(value ?? "MEMBER").toUpperCase();
+
+  if (role === "OWNER" || role === "ADMIN" || role === "MANAGER") return role;
+
+  return "MEMBER";
+}
+
+function statusToApi(value: Project["status"] | Task["status"]): string {
+  const map: Record<string, string> = {
+    Planning: "PLANNING",
+    Active: "ACTIVE",
+    "On Hold": "ON_HOLD",
+    Completed: "COMPLETED",
+    "To Do": "TODO",
+    "In Progress": "IN_PROGRESS",
+    Done: "DONE",
+  };
+
+  return map[value] ?? String(value).toUpperCase();
+}
+
+function mapProject(raw: AnyRecord, workspaceId: string): Project {
+  const projectMembers = extractArray(raw.members ?? raw.projectMembers, [
+    "members",
+    "projectMembers",
+  ]);
+
+  const memberIds = projectMembers
+    .map((item) => {
+      const record = asRecord(item);
+      return String(record.userId ?? record.user?.id ?? record.id ?? "");
+    })
+    .filter(Boolean);
+
   return {
-    id: makeId(),
-    workspaceId: WORKSPACE_ID,
-    type,
-    message,
-    actorId: CURRENT_USER_ID,
-    entityId,
-    createdAt: new Date().toISOString(),
+    id: String(raw.id),
+    workspaceId: String(raw.workspaceId ?? workspaceId),
+    name: String(raw.name ?? ""),
+    description: String(raw.description ?? ""),
+    status: projectStatus(raw.status),
+    priority: priority(raw.priority),
+    ownerId: String(
+      raw.ownerId ?? raw.createdById ?? raw.createdBy?.id ?? ""
+    ),
+    memberIds,
+    // The current backend Project model does not persist category.
+    category: String(raw.category ?? "Other"),
+    startDate: dateOnly(raw.startDate),
+    dueDate: dateOnly(raw.dueDate),
+    createdAt: String(raw.createdAt ?? ""),
   };
 }
 
-function loadWorkspace(): WorkspaceData {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-
-    if (saved) {
-      const parsed = JSON.parse(saved) as WorkspaceData;
-
-      if (
-        Array.isArray(parsed.projects) &&
-        Array.isArray(parsed.tasks) &&
-        Array.isArray(parsed.members) &&
-        Array.isArray(parsed.activities)
-      ) {
-        return parsed;
-      }
-    }
-  } catch {
-    console.warn("Could not load saved workspace data.");
-  }
-
-  return initialData;
+function mapTask(raw: AnyRecord, workspaceId: string): Task {
+  return {
+    id: String(raw.id),
+    workspaceId: String(raw.workspaceId ?? workspaceId),
+    projectId: String(raw.projectId ?? ""),
+    title: String(raw.title ?? ""),
+    description: String(raw.description ?? ""),
+    status: taskStatus(raw.status),
+    priority: priority(raw.priority),
+    assigneeId: raw.assigneeId ? String(raw.assigneeId) : null,
+    dueDate: dateOnly(raw.dueDate),
+    createdAt: String(raw.createdAt ?? ""),
+  };
 }
 
-export function WorkspaceProvider({ children }: { children: ReactNode }) {
-  const [data, setData] = useState<WorkspaceData>(loadWorkspace);
+function mapMember(raw: AnyRecord, workspaceId: string): TeamMember {
+  const user = asRecord(raw.user);
+
+  return {
+    id: String(raw.userId ?? user.id ?? raw.id),
+    workspaceId: String(raw.workspaceId ?? workspaceId),
+    name: String(user.name ?? raw.name ?? ""),
+    email: String(user.email ?? raw.email ?? ""),
+    role: memberRole(raw.role),
+    joinedAt: formatJoinedAt(raw.joinedAt ?? raw.createdAt),
+  };
+}
+
+function mapActivity(raw: AnyRecord, workspaceId: string): Activity {
+  const actor = asRecord(raw.actor);
+
+  return {
+    id: String(raw.id),
+    workspaceId: String(raw.workspaceId ?? workspaceId),
+    type: raw.type,
+    message: String(raw.message ?? raw.description ?? ""),
+    actorId: String(raw.actorId ?? raw.userId ?? actor.id ?? ""),
+    actorName: String(actor.name ?? raw.actorName ?? ""),
+    entityId: String(raw.entityId ?? ""),
+    createdAt: String(raw.createdAt ?? ""),
+  };
+}
+
+export function WorkspaceProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const { user, token, isAuthenticated, refreshUser } = useAuth();
+
+  const workspaces = useMemo<WorkspaceSummary[]>(
+    () =>
+      (user?.workspaces ?? []).map((membership) => ({
+        id: membership.workspace.id,
+        name: membership.workspace.name,
+        slug: membership.workspace.slug,
+        role: membership.role,
+      })),
+    [user?.workspaces]
+  );
+
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string | null>(
+    () => localStorage.getItem(WORKSPACE_STORAGE_KEY)
+  );
+
+  // A stale or unknown selection falls back to the first workspace the user
+  // can actually reach.
+  const workspaceId =
+    workspaces.some((workspace) => workspace.id === selectedWorkspaceId)
+      ? selectedWorkspaceId
+      : workspaces[0]?.id ?? null;
+
+  const currentWorkspace =
+    workspaces.find((workspace) => workspace.id === workspaceId) ?? null;
+
+  const switchWorkspace = useCallback((id: string) => {
+    localStorage.setItem(WORKSPACE_STORAGE_KEY, id);
+    setSelectedWorkspaceId(id);
+  }, []);
+
+  const [data, setData] = useState<WorkspaceData>(EMPTY_DATA);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = useCallback(
+    <T,>(path: string, options: {
+      method?: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
+      body?: unknown;
+    } = {}) => {
+      if (!token) {
+        throw new Error("Your session has expired. Please sign in again.");
+      }
+
+      return apiRequest<T>(path, {
+        ...options,
+        token,
+      });
+    },
+    [token]
+  );
+
+  const refreshWorkspace = useCallback(async () => {
+    if (!isAuthenticated || !token || !workspaceId) {
+      setData(EMPTY_DATA);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const [projectsResponse, membersResponse, activitiesResponse] =
+        await Promise.all([
+          request<unknown>(
+            `/api/projects/workspaces/${workspaceId}`
+          ),
+          request<unknown>(
+            `/api/workspaces/${workspaceId}/members`
+          ),
+          request<unknown>(
+            `/api/activities/workspaces/${workspaceId}?page=1&limit=50`
+          ),
+        ]);
+
+      const rawProjects = extractArray(projectsResponse, ["projects"]);
+      const rawMembers = extractArray(membersResponse, ["members"]);
+      const rawActivities = extractArray(activitiesResponse, [
+        "activities",
+      ]);
+
+      const projects = rawProjects.map((item) =>
+        mapProject(item, workspaceId)
+      );
+
+      const members = rawMembers.map((item) =>
+        mapMember(item, workspaceId)
+      );
+
+      const tasksByProject = await Promise.all(
+        projects.map(async (project) => {
+          const response = await request<unknown>(
+            `/api/tasks/workspaces/${workspaceId}/projects/${project.id}`
+          );
+
+          return extractArray(response, ["tasks"]).map((item) =>
+            mapTask(item, workspaceId)
+          );
+        })
+      );
+
+      setData({
+        projects,
+        members,
+        tasks: tasksByProject.flat(),
+        activities: rawActivities.map((item) =>
+          mapActivity(item, workspaceId)
+        ),
+      });
+    } catch (caught) {
+      const message =
+        caught instanceof Error
+          ? caught.message
+          : "Unable to load workspace data.";
+
+      setError(message);
+      setData(EMPTY_DATA);
+    } finally {
+      setLoading(false);
+    }
+  }, [isAuthenticated, token, workspaceId, request]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    } catch {
-      console.error("Could not save workspace data.");
-    }
-  }, [data]);
+    void refreshWorkspace();
+  }, [refreshWorkspace]);
+
+  const createWorkspace = useCallback(
+    async (name: string) => {
+      const created = await request<AnyRecord>("/api/workspaces", {
+        method: "POST",
+        body: { name },
+      });
+
+      const createdId = String(created.id ?? "");
+
+      // The workspace list belongs to the user, so it has to be reloaded
+      // before the new workspace can be selected.
+      await refreshUser();
+      switchWorkspace(createdId);
+
+      return createdId;
+    },
+    [request, refreshUser, switchWorkspace]
+  );
 
   const createProject = useCallback(
-    (input: Omit<Project, "id" | "createdAt" | "workspaceId">) => {
-      const project: Project = {
-        ...input,
-        id: makeId(),
-        workspaceId: WORKSPACE_ID,
-        createdAt: new Date().toISOString(),
-      };
+    async (input: ProjectInput) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-      setData((current) => ({
-        ...current,
-        projects: [project, ...current.projects],
-        activities: [
-          makeActivity("PROJECT_CREATED", `Created project ${project.name}`, project.id),
-          ...current.activities,
-        ],
-      }));
+      const created = await request<unknown>(
+        `/api/projects/workspaces/${workspaceId}`,
+        {
+          method: "POST",
+          body: {
+            name: input.name,
+            description: input.description,
+            status: statusToApi(input.status),
+            priority: input.priority.toUpperCase(),
+            startDate: input.startDate || null,
+            dueDate: input.dueDate || null,
+          },
+        }
+      );
+
+      const record = asRecord(created);
+      const project = asRecord(record.project ?? created);
+      const projectId = project.id ? String(project.id) : null;
+
+      if (projectId) {
+        for (const memberId of input.memberIds) {
+          // The backend makes the creator the owner and already adds them as
+          // a member, so only the remaining members are attached here.
+          if (memberId === user?.id) continue;
+
+          await request(
+            `/api/projects/workspaces/${workspaceId}/${projectId}/members`,
+            {
+              method: "POST",
+              body: { userId: memberId },
+            }
+          );
+        }
+      }
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, user?.id, request, refreshWorkspace]
   );
 
   const updateProject = useCallback(
-    (id: string, input: Partial<Omit<Project, "id" | "workspaceId">>) => {
-      setData((current) => {
-        const existing = current.projects.find((item) => item.id === id);
-        if (!existing) return current;
+    async (
+      id: string,
+      input: Partial<Omit<Project, "id" | "workspaceId">>
+    ) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-        const updated = { ...existing, ...input };
+      const body: AnyRecord = {};
 
-        return {
-          ...current,
-          projects: current.projects.map((item) =>
-            item.id === id ? updated : item
-          ),
-          activities: [
-            makeActivity("PROJECT_UPDATED", `Updated project ${updated.name}`, id),
-            ...current.activities,
-          ],
-        };
-      });
+      if (input.name !== undefined) body.name = input.name;
+      if (input.description !== undefined) body.description = input.description;
+      if (input.status !== undefined) body.status = statusToApi(input.status);
+      if (input.priority !== undefined) body.priority = input.priority.toUpperCase();
+      if (input.startDate !== undefined) body.startDate = input.startDate || null;
+      if (input.dueDate !== undefined) body.dueDate = input.dueDate || null;
+
+      await request(
+        `/api/projects/workspaces/${workspaceId}/${id}`,
+        { method: "PATCH", body }
+      );
+
+      if (input.memberIds) {
+        const current = data.projects.find((project) => project.id === id);
+        const previousIds = current?.memberIds ?? [];
+
+        for (const memberId of input.memberIds) {
+          if (!previousIds.includes(memberId)) {
+            await request(
+              `/api/projects/workspaces/${workspaceId}/${id}/members`,
+              {
+                method: "POST",
+                body: { userId: memberId },
+              }
+            );
+          }
+        }
+
+        for (const memberId of previousIds) {
+          // The owner can never be detached from their own project.
+          if (
+            !input.memberIds.includes(memberId) &&
+            memberId !== current?.ownerId
+          ) {
+            await request(
+              `/api/projects/workspaces/${workspaceId}/${id}/members/${memberId}`,
+              { method: "DELETE" }
+            );
+          }
+        }
+      }
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, data.projects, request, refreshWorkspace]
   );
 
-  const deleteProject = useCallback((id: string) => {
-    setData((current) => {
-      const project = current.projects.find((item) => item.id === id);
-      if (!project) return current;
+  const deleteProject = useCallback(
+    async (id: string) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-      return {
-        ...current,
-        projects: current.projects.filter((item) => item.id !== id),
-        tasks: current.tasks.filter((task) => task.projectId !== id),
-        activities: [
-          makeActivity("PROJECT_DELETED", `Deleted project ${project.name}`, id),
-          ...current.activities,
-        ],
-      };
-    });
-  }, []);
+      await request(
+        `/api/projects/workspaces/${workspaceId}/${id}`,
+        { method: "DELETE" }
+      );
+
+      await refreshWorkspace();
+    },
+    [workspaceId, request, refreshWorkspace]
+  );
 
   const createTask = useCallback(
-    (input: Omit<Task, "id" | "createdAt" | "workspaceId">) => {
-      const task: Task = {
-        ...input,
-        id: makeId(),
-        workspaceId: WORKSPACE_ID,
-        createdAt: new Date().toISOString(),
-      };
+    async (input: TaskInput) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-      setData((current) => ({
-        ...current,
-        tasks: [task, ...current.tasks],
-        activities: [
-          makeActivity("TASK_CREATED", `Created task ${task.title}`, task.id),
-          ...current.activities,
-        ],
-      }));
+      await request(
+        `/api/tasks/workspaces/${workspaceId}/projects/${input.projectId}`,
+        {
+          method: "POST",
+          body: {
+            title: input.title,
+            description: input.description,
+            status: statusToApi(input.status),
+            priority: input.priority.toUpperCase(),
+            assigneeId: input.assigneeId,
+            dueDate: input.dueDate || null,
+          },
+        }
+      );
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, request, refreshWorkspace]
   );
 
   const updateTask = useCallback(
-    (id: string, input: Partial<Omit<Task, "id" | "workspaceId">>) => {
-      setData((current) => {
-        const existing = current.tasks.find((item) => item.id === id);
-        if (!existing) return current;
+    async (
+      id: string,
+      input: Partial<Omit<Task, "id" | "workspaceId">>
+    ) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-        const updated = { ...existing, ...input };
-        const completedNow =
-          existing.status !== "Done" && updated.status === "Done";
+      const existing = data.tasks.find((task) => task.id === id);
+      const projectId = input.projectId ?? existing?.projectId;
 
-        return {
-          ...current,
-          tasks: current.tasks.map((item) =>
-            item.id === id ? updated : item
-          ),
-          activities: [
-            makeActivity(
-              completedNow ? "TASK_COMPLETED" : "TASK_UPDATED",
-              completedNow ? `Completed ${updated.title}` : `Updated ${updated.title}`,
-              id
-            ),
-            ...current.activities,
-          ],
-        };
-      });
+      if (!projectId) throw new Error("The task's project could not be found.");
+
+      const body: AnyRecord = {};
+
+      if (input.title !== undefined) body.title = input.title;
+      if (input.description !== undefined) body.description = input.description;
+      if (input.status !== undefined) body.status = statusToApi(input.status);
+      if (input.priority !== undefined) body.priority = input.priority.toUpperCase();
+      if (input.assigneeId !== undefined) body.assigneeId = input.assigneeId;
+      if (input.dueDate !== undefined) body.dueDate = input.dueDate || null;
+
+      await request(
+        `/api/tasks/workspaces/${workspaceId}/projects/${projectId}/${id}`,
+        { method: "PATCH", body }
+      );
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, data.tasks, request, refreshWorkspace]
   );
 
-  const deleteTask = useCallback((id: string) => {
-    setData((current) => {
-      const task = current.tasks.find((item) => item.id === id);
-      if (!task) return current;
+  const deleteTask = useCallback(
+    async (id: string) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-      return {
-        ...current,
-        tasks: current.tasks.filter((item) => item.id !== id),
-        activities: [
-          makeActivity("TASK_DELETED", `Deleted task ${task.title}`, id),
-          ...current.activities,
-        ],
-      };
-    });
-  }, []);
+      const task = data.tasks.find((item) => item.id === id);
+      if (!task) return;
+
+      await request(
+        `/api/tasks/workspaces/${workspaceId}/projects/${task.projectId}/${id}`,
+        { method: "DELETE" }
+      );
+
+      await refreshWorkspace();
+    },
+    [workspaceId, data.tasks, request, refreshWorkspace]
+  );
 
   const createMember = useCallback(
-    (input: Omit<TeamMember, "id" | "joinedAt" | "workspaceId">) => {
-      const member: TeamMember = {
-        ...input,
-        id: makeId(),
-        workspaceId: WORKSPACE_ID,
-        joinedAt: new Date().toLocaleDateString("en-US", {
-          month: "short",
-          year: "numeric",
-        }),
-      };
+    async (input: MemberInput) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-      setData((current) => ({
-        ...current,
-        members: [member, ...current.members],
-        activities: [
-          makeActivity("MEMBER_ADDED", `Added ${member.name} to the team`, member.id),
-          ...current.activities,
-        ],
-      }));
+      const created = await request<AnyRecord>(
+        `/api/workspaces/${workspaceId}/members`,
+        {
+          method: "POST",
+          body: {
+            email: input.email,
+            role: input.role,
+          },
+        }
+      );
+
+      await refreshWorkspace();
+
+      const user = asRecord(created.user);
+
+      return String(created.userId ?? user.id ?? "");
     },
-    []
+    [workspaceId, request, refreshWorkspace]
   );
 
   const updateMember = useCallback(
-    (id: string, input: Partial<Omit<TeamMember, "id" | "workspaceId">>) => {
-      setData((current) => {
-        const existing = current.members.find((item) => item.id === id);
-        if (!existing) return current;
+    async (
+      id: string,
+      input: Partial<Omit<TeamMember, "id" | "workspaceId">>
+    ) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-        const updated = { ...existing, ...input };
+      const current = data.members.find((member) => member.id === id);
 
-        return {
-          ...current,
-          members: current.members.map((item) =>
-            item.id === id ? updated : item
-          ),
-          activities: [
-            makeActivity("MEMBER_UPDATED", `Updated ${updated.name}`, id),
-            ...current.activities,
-          ],
-        };
-      });
+      // The backend refuses to change the owner role, so it is never sent.
+      if (
+        input.role &&
+        input.role !== current?.role &&
+        current?.role !== "OWNER"
+      ) {
+        await request(
+          `/api/workspaces/${workspaceId}/members/${id}`,
+          {
+            method: "PATCH",
+            body: { role: input.role },
+          }
+        );
+      }
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, data.members, request, refreshWorkspace]
   );
 
-  const deleteMember = useCallback((id: string) => {
-    setData((current) => {
-      const member = current.members.find((item) => item.id === id);
-      if (!member || member.role === "Admin") return current;
+  const deleteMember = useCallback(
+    async (id: string) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-      const fallbackAdmin = current.members.find(
-        (item) => item.role === "Admin" && item.id !== id
+      await request(
+        `/api/workspaces/${workspaceId}/members/${id}`,
+        { method: "DELETE" }
       );
 
-      return {
-        ...current,
-        members: current.members.filter((item) => item.id !== id),
-        projects: current.projects.map((project) => ({
-          ...project,
-          memberIds: project.memberIds.filter((memberId) => memberId !== id),
-          ownerId:
-            project.ownerId === id
-              ? fallbackAdmin?.id ?? ""
-              : project.ownerId,
-        })),
-        tasks: current.tasks.map((task) => ({
-          ...task,
-          assigneeId: task.assigneeId === id ? null : task.assigneeId,
-        })),
-        activities: [
-          makeActivity("MEMBER_REMOVED", `Removed ${member.name} from the team`, id),
-          ...current.activities,
-        ],
-      };
-    });
-  }, []);
+      await refreshWorkspace();
+    },
+    [workspaceId, request, refreshWorkspace]
+  );
 
   const assignMemberToProject = useCallback(
-    (projectId: string, memberId: string) => {
-      setData((current) => {
-        const memberExists = current.members.some((item) => item.id === memberId);
-        if (!memberExists) return current;
+    async (projectId: string, memberId: string) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
 
-        return {
-          ...current,
-          projects: current.projects.map((project) =>
-            project.id === projectId && !project.memberIds.includes(memberId)
-              ? { ...project, memberIds: [...project.memberIds, memberId] }
-              : project
-          ),
-        };
-      });
+      await request(
+        `/api/projects/workspaces/${workspaceId}/${projectId}/members`,
+        {
+          method: "POST",
+          body: { userId: memberId },
+        }
+      );
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, request, refreshWorkspace]
   );
 
   const removeMemberFromProject = useCallback(
-    (projectId: string, memberId: string) => {
-      setData((current) => ({
-        ...current,
-        projects: current.projects.map((project) =>
-          project.id === projectId
-            ? {
-                ...project,
-                memberIds: project.memberIds.filter((id) => id !== memberId),
-                ownerId: project.ownerId === memberId ? "" : project.ownerId,
-              }
-            : project
-        ),
-        tasks: current.tasks.map((task) =>
-          task.projectId === projectId && task.assigneeId === memberId
-            ? { ...task, assigneeId: null }
-            : task
-        ),
-      }));
+    async (projectId: string, memberId: string) => {
+      if (!workspaceId) throw new Error("No workspace is selected.");
+
+      await request(
+        `/api/projects/workspaces/${workspaceId}/${projectId}/members/${memberId}`,
+        { method: "DELETE" }
+      );
+
+      await refreshWorkspace();
     },
-    []
+    [workspaceId, request, refreshWorkspace]
   );
 
   const getProjectProgress = useCallback(
@@ -537,7 +708,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         (task) => task.projectId === projectId
       );
 
-      if (projectTasks.length === 0) return 0;
+      if (!projectTasks.length) return 0;
 
       return Math.round(
         (projectTasks.filter((task) => task.status === "Done").length /
@@ -568,13 +739,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   const getMemberProjects = useCallback(
     (memberId: string) =>
-      data.projects.filter((project) => project.memberIds.includes(memberId)),
+      data.projects.filter((project) =>
+        project.memberIds.includes(memberId)
+      ),
     [data.projects]
   );
 
-  const value = useMemo(
+  const value = useMemo<WorkspaceContextValue>(
     () => ({
       ...data,
+      loading,
+      error,
+      workspaceId,
+      workspaces,
+      currentWorkspace,
+      switchWorkspace,
+      refreshWorkspace,
+      createWorkspace,
       createProject,
       updateProject,
       deleteProject,
@@ -593,6 +774,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }),
     [
       data,
+      loading,
+      error,
+      workspaceId,
+      workspaces,
+      currentWorkspace,
+      switchWorkspace,
+      refreshWorkspace,
+      createWorkspace,
       createProject,
       updateProject,
       deleteProject,
@@ -611,9 +800,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     ]
   );
 
- return (
-  <WorkspaceContext.Provider value={value}>
-    {children}
-  </WorkspaceContext.Provider>
-);
+  return (
+    <WorkspaceContext.Provider value={value}>
+      {children}
+    </WorkspaceContext.Provider>
+  );
 }
