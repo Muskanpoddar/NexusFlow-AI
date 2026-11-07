@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 import { useWorkspace } from "../hooks/useWorkspace";
+import { formatRole } from "../features/auth/authService";
 import TaskModal, {
   type TaskFormData,
 } from "../features/tasks/TaskModal";
@@ -101,6 +102,8 @@ function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
     (task) => task.status === "Done"
   ).length;
 
+  const ownerId = project.ownerId;
+
   const todoTasks = projectTasks.filter(
     (task) => task.status === "To Do"
   ).length;
@@ -155,6 +158,9 @@ function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
     const assigned = projectMembers.some((member) => member.id === memberId);
 
     if (assigned) {
+      // The backend keeps the owner attached to their own project.
+      if (memberId === ownerId) return;
+
       removeMemberFromProject(projectId, memberId);
     } else {
       assignMemberToProject(projectId, memberId);
@@ -479,7 +485,7 @@ function ProjectDetails({ projectId, onBack }: ProjectDetailsProps) {
                         </p>
 
                         <p className="truncate text-xs text-slate-400">
-                          {member.role}
+                          {formatRole(member.role)}
                         </p>
                       </div>
                     </div>

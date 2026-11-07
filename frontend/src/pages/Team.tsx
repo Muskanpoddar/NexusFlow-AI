@@ -11,6 +11,9 @@ import {
   BriefcaseBusiness,
 } from "lucide-react";
 
+import { useWorkspace } from "../hooks/useWorkspace";
+import { formatRole } from "../features/auth/authService";
+
 import MemberModal, {
   type TeamMember,
   type TeamProject,
@@ -21,73 +24,27 @@ import MemberCard from "../features/team/MemberCard";
 
 type TeamView = "all" | "projects" | "unassigned";
 
-const initialProjects: TeamProject[] = [
-  { id: "p1", name: "NexusFlow Dashboard", color: "#6366f1" },
-  { id: "p2", name: "Mobile App Development", color: "#0ea5e9" },
-  { id: "p3", name: "Website Redesign", color: "#10b981" },
-  { id: "p4", name: "AI Integration", color: "#f59e0b" },
-];
-
-const initialMembers: TeamMember[] = [
-  {
-    id: "m1",
-    name: "Muskan Poddar",
-    email: "muskan@example.com",
-    role: "Admin",
-    department: "Engineering",
-    joinedAt: "Jan 2026",
-    projectIds: ["p1", "p2", "p4"],
-  },
-  {
-    id: "m2",
-    name: "Komal Sharma",
-    email: "komal@example.com",
-    role: "Manager",
-    department: "Product",
-    joinedAt: "Feb 2026",
-    projectIds: ["p1", "p3"],
-  },
-  {
-    id: "m3",
-    name: "Rahul Kumar",
-    email: "rahul@example.com",
-    role: "Member",
-    department: "Engineering",
-    joinedAt: "Mar 2026",
-    projectIds: ["p2", "p4"],
-  },
-  {
-    id: "m4",
-    name: "Ananya Singh",
-    email: "ananya@example.com",
-    role: "Member",
-    department: "Design",
-    joinedAt: "Mar 2026",
-    projectIds: ["p3"],
-  },
-  {
-    id: "m5",
-    name: "Arjun Mehta",
-    email: "arjun@example.com",
-    role: "Manager",
-    department: "Engineering",
-    joinedAt: "Apr 2026",
-    projectIds: ["p1", "p2"],
-  },
-  {
-    id: "m6",
-    name: "Priya Verma",
-    email: "priya@example.com",
-    role: "Member",
-    department: "Marketing",
-    joinedAt: "Apr 2026",
-    projectIds: [],
-  },
+const PROJECT_COLORS = [
+  "#6366f1",
+  "#0ea5e9",
+  "#10b981",
+  "#f59e0b",
+  "#ec4899",
+  "#8b5cf6",
 ];
 
 function Team() {
-  const [members, setMembers] = useState<TeamMember[]>(initialMembers);
-  const [projects] = useState<TeamProject[]>(initialProjects);
+  const {
+    members,
+    projects,
+    loading,
+    error,
+    createMember,
+    updateMember,
+    deleteMember,
+    assignMemberToProject,
+    removeMemberFromProject,
+  } = useWorkspace();
 
   const [activeView, setActiveView] = useState<TeamView>("all");
   const [search, setSearch] = useState("");
@@ -97,13 +54,40 @@ function Team() {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [initialProjectIds, setInitialProjectIds] = useState<string[]>([]);
+  const [serverError, setServerError] = useState("");
+  const [pageError, setPageError] = useState("");
+
+  const teamProjects = useMemo<TeamProject[]>(
+    () =>
+      projects.map((project, index) => ({
+        id: project.id,
+        name: project.name,
+        color: PROJECT_COLORS[index % PROJECT_COLORS.length],
+      })),
+    [projects]
+  );
+
+  const teamMembers = useMemo<TeamMember[]>(
+    () =>
+      members.map((member) => ({
+        id: member.id,
+        name: member.name,
+        email: member.email,
+        role: member.role,
+        joinedAt: member.joinedAt,
+        projectIds: projects
+          .filter((project) => project.memberIds.includes(member.id))
+          .map((project) => project.id),
+      })),
+    [members, projects]
+  );
 
   const filteredMembers = useMemo(() => {
-    return members.filter((member) => {
+    return teamMembers.filter((member) => {
       const matchesSearch =
         member.name.toLowerCase().includes(search.toLowerCase()) ||
-        member.email.toLowerCase().includes(search.toLowerCase()) ||
-        member.department.toLowerCase().includes(search.toLowerCase());
+        member.email.toLowerCase().includes(search.toLowerCase());
 
       const matchesRole =
         roleFilter === "All" || member.role === roleFilter;
@@ -122,65 +106,95 @@ function Team() {
         matchesView
       );
     });
-  }, [members, search, roleFilter, selectedProject, activeView]);
+  }, [teamMembers, search, roleFilter, selectedProject, activeView]);
 
-  const totalAssigned = members.filter(
+  const totalAssigned = teamMembers.filter(
     (member) => member.projectIds.length > 0
   ).length;
 
-  const totalUnassigned = members.length - totalAssigned;
+  const totalUnassigned = teamMembers.length - totalAssigned;
 
-  const openAddModal = () => {
+  const openAddModal = (projectIds: string[] = []) => {
     setEditingMember(null);
+    setInitialProjectIds(projectIds);
+    setServerError("");
     setModalOpen(true);
   };
 
   const openEditModal = (member: TeamMember) => {
     setEditingMember(member);
+    setInitialProjectIds([]);
+    setServerError("");
     setModalOpen(true);
   };
 
-  const handleSaveMember = (
+  const handleSaveMember = async (
     data: Omit<TeamMember, "id" | "joinedAt">
   ) => {
-    if (editingMember) {
-      setMembers((current) =>
-        current.map((member) =>
-          member.id === editingMember.id
-            ? { ...member, ...data }
-            : member
-        )
+    setServerError("");
+
+    try {
+      if (editingMember) {
+        await updateMember(editingMember.id, { role: data.role });
+
+        // A project owner can never be detached from their own project.
+        const ownedProjectIds = projects
+          .filter((project) => project.ownerId === editingMember.id)
+          .map((project) => project.id);
+
+        for (const projectId of data.projectIds) {
+          if (!editingMember.projectIds.includes(projectId)) {
+            await assignMemberToProject(projectId, editingMember.id);
+          }
+        }
+
+        for (const projectId of editingMember.projectIds) {
+          if (
+            !data.projectIds.includes(projectId) &&
+            !ownedProjectIds.includes(projectId)
+          ) {
+            await removeMemberFromProject(projectId, editingMember.id);
+          }
+        }
+      } else {
+        const userId = await createMember({
+          name: data.name,
+          email: data.email,
+          role: data.role,
+        });
+
+        for (const projectId of data.projectIds) {
+          await assignMemberToProject(projectId, userId);
+        }
+      }
+
+      setModalOpen(false);
+      setEditingMember(null);
+    } catch (caught) {
+      setServerError(
+        caught instanceof Error
+          ? caught.message
+          : "The member could not be saved."
       );
-    } else {
-      const newMember: TeamMember = {
-        ...data,
-        id: crypto.randomUUID(),
-        joinedAt: new Date().toLocaleDateString("en-US", {
-          month: "short",
-          year: "numeric",
-        }),
-      };
-
-      setMembers((current) => [newMember, ...current]);
     }
-
-    setModalOpen(false);
-    setEditingMember(null);
   };
 
-  const handleDeleteMember = (member: TeamMember) => {
-    if (member.role === "Admin") {
-      window.alert("Admin members cannot be removed from this directory.");
-      return;
-    }
-
+  const handleDeleteMember = async (member: TeamMember) => {
     const confirmed = window.confirm(
-      `Remove ${member.name} from the team directory?`
+      `Remove ${member.name} from the workspace?`
     );
 
-    if (confirmed) {
-      setMembers((current) =>
-        current.filter((item) => item.id !== member.id)
+    if (!confirmed) return;
+
+    setPageError("");
+
+    try {
+      await deleteMember(member.id);
+    } catch (caught) {
+      setPageError(
+        caught instanceof Error
+          ? caught.message
+          : "The member could not be removed."
       );
     }
   };
@@ -191,11 +205,11 @@ function Team() {
     );
 
   const tabs: { id: TeamView; label: string; count: number }[] = [
-    { id: "all", label: "All members", count: members.length },
+    { id: "all", label: "All members", count: teamMembers.length },
     {
       id: "projects",
       label: "By project",
-      count: projects.length,
+      count: teamProjects.length,
     },
     {
       id: "unassigned",
@@ -229,7 +243,7 @@ function Team() {
       >
         <MemberCard
           member={member}
-          projects={projects}
+          projects={teamProjects}
           onEdit={openEditModal}
           onDelete={handleDeleteMember}
         />
@@ -257,7 +271,7 @@ function Team() {
 
         <button
           type="button"
-          onClick={openAddModal}
+          onClick={() => openAddModal()}
           className="flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-indigo-700 hover:shadow-md active:translate-y-0"
         >
           <UserPlus size={17} />
@@ -265,19 +279,25 @@ function Team() {
         </button>
       </div>
 
+      {(error || pageError) && (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {pageError || error}
+        </p>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {[
           {
             label: "Total members",
-            value: members.length,
+            value: teamMembers.length,
             hint: "In your organization",
             icon: Users,
             iconClass: "bg-indigo-50 text-indigo-600",
           },
           {
             label: "Active projects",
-            value: projects.length,
+            value: teamProjects.length,
             hint: "Projects with team assignments",
             icon: FolderKanban,
             iconClass: "bg-sky-50 text-sky-600",
@@ -316,7 +336,7 @@ function Team() {
                 </div>
               </div>
               <p className="mt-3 text-3xl font-bold tabular-nums text-slate-900">
-                {item.value}
+                {loading ? "—" : item.value}
               </p>
               <p className="mt-1 text-xs text-slate-400">
                 {item.hint}
@@ -371,7 +391,7 @@ function Team() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, email or department..."
+              placeholder="Search name or email..."
               className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-4 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
             />
           </div>
@@ -384,7 +404,7 @@ function Team() {
                 className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-indigo-500"
               >
                 <option value="all">All projects</option>
-                {projects.map((project) => (
+                {teamProjects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
                   </option>
@@ -400,9 +420,10 @@ function Team() {
               className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-600 outline-none focus:border-indigo-500"
             >
               <option value="All">All roles</option>
-              <option value="Admin">Admin</option>
-              <option value="Manager">Manager</option>
-              <option value="Member">Member</option>
+              <option value="OWNER">{formatRole("OWNER")}</option>
+              <option value="ADMIN">{formatRole("ADMIN")}</option>
+              <option value="MANAGER">{formatRole("MANAGER")}</option>
+              <option value="MEMBER">{formatRole("MEMBER")}</option>
             </select>
 
             {activeView !== "projects" && (
@@ -468,7 +489,7 @@ function Team() {
         {/* Project-wise members */}
         {activeView === "projects" && (
           <div className="space-y-7 p-5">
-            {projects.map((project, projectIndex) => {
+            {teamProjects.map((project, projectIndex) => {
               const assigned = projectMembers(project.id);
 
               return (
@@ -496,10 +517,7 @@ function Team() {
 
                     <button
                       type="button"
-                      onClick={() => {
-                        setEditingMember(null);
-                        setModalOpen(true);
-                      }}
+                      onClick={() => openAddModal([project.id])}
                       className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition-all duration-200 hover:border-indigo-200 hover:bg-indigo-50/60 hover:text-indigo-600"
                     >
                       <UserPlus size={14} />
@@ -519,7 +537,7 @@ function Team() {
                         >
                           <MemberCard
                             member={member}
-                            projects={projects}
+                            projects={teamProjects}
                             onEdit={openEditModal}
                             onDelete={handleDeleteMember}
                           />
@@ -539,6 +557,12 @@ function Team() {
                 </section>
               );
             })}
+
+            {teamProjects.length === 0 && (
+              <p className="py-10 text-center text-sm text-slate-400">
+                No projects in this workspace yet.
+              </p>
+            )}
           </div>
         )}
 
@@ -573,10 +597,13 @@ function Team() {
       {modalOpen && (
         <MemberModal
           member={editingMember}
-          projects={projects}
+          projects={teamProjects}
+          initialProjectIds={initialProjectIds}
+          serverError={serverError}
           onClose={() => {
             setModalOpen(false);
             setEditingMember(null);
+            setServerError("");
           }}
           onSave={handleSaveMember}
         />

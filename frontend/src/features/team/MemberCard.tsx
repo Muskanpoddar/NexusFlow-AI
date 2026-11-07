@@ -1,5 +1,6 @@
 
 import { Mail, Pencil, Trash2, FolderKanban } from "lucide-react";
+import { formatRole } from "../auth/authService";
 import type { TeamMember, TeamProject } from "./MemberModal";
 
 interface MemberCardProps {
@@ -10,9 +11,10 @@ interface MemberCardProps {
 }
 
 const roleStyles: Record<TeamMember["role"], string> = {
-  Admin: "bg-violet-50 text-violet-700",
-  Manager: "bg-blue-50 text-blue-700",
-  Member: "bg-slate-100 text-slate-600",
+  OWNER: "bg-amber-50 text-amber-700",
+  ADMIN: "bg-violet-50 text-violet-700",
+  MANAGER: "bg-blue-50 text-blue-700",
+  MEMBER: "bg-slate-100 text-slate-600",
 };
 
 function MemberCard({
@@ -43,9 +45,7 @@ function MemberCard({
             <h3 className="font-semibold text-slate-900 transition-colors duration-200 group-hover:text-indigo-700">
               {member.name}
             </h3>
-            <p className="mt-0.5 text-xs text-slate-500">
-              {member.department}
-            </p>
+            <p className="mt-0.5 text-xs text-slate-500">Team member</p>
           </div>
         </div>
 
@@ -58,14 +58,17 @@ function MemberCard({
           >
             <Pencil size={16} />
           </button>
-          <button
-            type="button"
-            onClick={() => onDelete(member)}
-            aria-label={`Remove ${member.name}`}
-            className="rounded-lg p-2 text-slate-400 transition-colors duration-200 hover:bg-red-50 hover:text-red-600"
-          >
-            <Trash2 size={16} />
-          </button>
+          {/* The workspace owner can never be removed. */}
+          {member.role !== "OWNER" && (
+            <button
+              type="button"
+              onClick={() => onDelete(member)}
+              aria-label={`Remove ${member.name}`}
+              className="rounded-lg p-2 text-slate-400 transition-colors duration-200 hover:bg-red-50 hover:text-red-600"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -78,7 +81,7 @@ function MemberCard({
         <span
           className={`rounded-full px-3 py-1 text-xs font-semibold ${roleStyles[member.role]}`}
         >
-          {member.role}
+          {formatRole(member.role)}
         </span>
         <span className="text-xs text-slate-400">
           Joined {member.joinedAt}

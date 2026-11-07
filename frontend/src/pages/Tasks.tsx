@@ -1,4 +1,6 @@
+
 import { useMemo, useState } from "react";
+
 import {
   Plus,
   Search,
@@ -61,6 +63,8 @@ function Tasks() {
   const [view, setView] = useState<"board" | "list">("board");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [pageError, setPageError] = useState("");
 
   const projectMap = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
@@ -139,31 +143,74 @@ function Tasks() {
   }
 
   function closeModal() {
+    if (isSaving) return;
+
     setModalOpen(false);
     setEditingTask(null);
   }
 
-  function saveTask(data: TaskFormData) {
-    if (editingTask) {
-      updateTask(editingTask.id, data);
-    } else {
-      createTask(data);
-    }
+  async function saveTask(data: TaskFormData) {
+    if (isSaving) return;
 
-    closeModal();
+    setIsSaving(true);
+    setPageError("");
+
+    try {
+      if (editingTask) {
+        await updateTask(editingTask.id, data);
+      } else {
+        await createTask(data);
+      }
+
+      setModalOpen(false);
+      setEditingTask(null);
+    } catch (error) {
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the task. Please try again."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function handleDeleteTask(id: string) {
-    if (window.confirm("Are you sure you want to delete this task?")) {
-      deleteTask(id);
+  async function handleDeleteTask(id: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this task?"
+    );
+
+    if (!confirmed) return;
+
+    setPageError("");
+
+    try {
+      await deleteTask(id);
+    } catch (error) {
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the task. Please try again."
+      );
     }
   }
 
-  function changeStatus(id: string, status: TaskStatus) {
-    updateTask(id, { status });
+  async function changeStatus(id: string, status: TaskStatus) {
+    setPageError("");
+
+    try {
+      await updateTask(id, { status });
+    } catch (error) {
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update the task status. Please try again."
+      );
+    }
   }
 
   const today = new Date().toISOString().slice(0, 10);
+
   const overdueCount = tasks.filter(
     (task) => task.status !== "Done" && task.dueDate < today
   ).length;
@@ -176,12 +223,14 @@ function Tasks() {
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">
               My Tasks
             </h1>
+
             {overdueCount > 0 && (
               <span className="animate-pop-in rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-600">
                 {overdueCount} overdue
               </span>
             )}
           </div>
+
           <p className="mt-1 text-sm text-slate-500">
             Manage assignments, organize priorities and track progress.
           </p>
@@ -196,6 +245,12 @@ function Tasks() {
         </button>
       </section>
 
+      {pageError && (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {pageError}
+        </p>
+      )}
+
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {summary.map((item, index) => {
           const Icon = item.icon;
@@ -208,12 +263,14 @@ function Tasks() {
             >
               <div className="flex items-center justify-between">
                 <p className="text-sm text-slate-500">{item.label}</p>
+
                 <div
                   className={`rounded-lg p-2 transition-transform duration-200 ${item.bg}`}
                 >
                   <Icon size={19} className={item.color} />
                 </div>
               </div>
+
               <p className="mt-3 text-2xl font-bold tabular-nums text-slate-900">
                 {item.value}
               </p>
@@ -222,12 +279,16 @@ function Tasks() {
         })}
       </section>
 
-      <section className="animate-slide-up flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 md:flex-row md:items-center md:justify-between" style={{ animationDelay: "220ms" }}>
+      <section
+        className="animate-slide-up flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 md:flex-row md:items-center md:justify-between"
+        style={{ animationDelay: "220ms" }}
+      >
         <div className="relative w-full md:max-w-sm">
           <Search
             size={18}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
           />
+
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -284,6 +345,7 @@ function Tasks() {
         <section className="grid grid-cols-1 items-start gap-5 lg:grid-cols-3">
           {columns.map((column, columnIndex) => {
             const Icon = column.icon;
+
             const columnTasks = filteredTasks.filter(
               (task) => task.status === column.title
             );
@@ -299,9 +361,11 @@ function Tasks() {
                     <div className={`rounded-lg p-2 ${column.background}`}>
                       <Icon size={17} className={column.color} />
                     </div>
+
                     <h2 className="font-semibold text-slate-800">
                       {column.title}
                     </h2>
+
                     <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium tabular-nums text-slate-500">
                       {columnTasks.length}
                     </span>
@@ -314,17 +378,21 @@ function Tasks() {
                       key={task.id}
                       className="animate-slide-up"
                       style={{
-                        animationDelay: `${columnIndex * 90 + taskIndex * 60}ms`,
+                        animationDelay: `${
+                          columnIndex * 90 + taskIndex * 60
+                        }ms`,
                       }}
                     >
                       <TaskCard
                         task={task}
                         projectName={
-                          projectMap.get(task.projectId) ?? "Project unavailable"
+                          projectMap.get(task.projectId) ??
+                          "Project unavailable"
                         }
                         assigneeName={
                           task.assigneeId
-                            ? memberMap.get(task.assigneeId) ?? "Member unavailable"
+                            ? memberMap.get(task.assigneeId) ??
+                              "Member unavailable"
                             : ""
                         }
                         onEdit={openEditModal}
@@ -378,6 +446,7 @@ function Tasks() {
                     <p className="text-sm font-semibold text-slate-800">
                       {task.title}
                     </p>
+
                     <p className="mt-1 max-w-52 truncate text-xs text-slate-400">
                       {task.description}
                     </p>
@@ -409,7 +478,10 @@ function Tasks() {
 
                   <td className="whitespace-nowrap px-5 py-4 text-sm text-slate-600">
                     <span className="flex items-center gap-1">
-                      <CalendarDays size={14} className="text-slate-400" />
+                      <CalendarDays
+                        size={14}
+                        className="text-slate-400"
+                      />
                       {task.dueDate}
                     </span>
                   </td>
@@ -418,7 +490,10 @@ function Tasks() {
                     <select
                       value={task.status}
                       onChange={(e) =>
-                        changeStatus(task.id, e.target.value as TaskStatus)
+                        changeStatus(
+                          task.id,
+                          e.target.value as TaskStatus
+                        )
                       }
                       className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none transition-colors duration-200 focus:border-blue-500"
                     >
@@ -437,6 +512,7 @@ function Tasks() {
                       >
                         <Pencil size={16} />
                       </button>
+
                       <button
                         onClick={() => handleDeleteTask(task.id)}
                         aria-label="Delete task"

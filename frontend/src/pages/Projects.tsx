@@ -1,5 +1,6 @@
 
 import { useMemo, useState } from "react";
+
 import {
   Plus,
   Search,
@@ -13,6 +14,7 @@ import ProjectCard from "../features/projects/ProjectCard";
 import ProjectModal, {
   type ProjectFormData,
 } from "../features/projects/ProjectModal";
+import { useAuth } from "../hooks/useAuth";
 import { useWorkspace } from "../hooks/useWorkspace";
 import type { Project } from "../types/project";
 
@@ -21,9 +23,10 @@ interface ProjectsProps {
 }
 
 function Projects({ onOpenProject }: ProjectsProps) {
+  const { user } = useAuth();
+
   const {
     projects,
-    members,
     createProject,
     updateProject,
     deleteProject,
@@ -35,6 +38,8 @@ function Projects({ onOpenProject }: ProjectsProps) {
   const [view, setView] = useState<"grid" | "list">("grid");
   const [modalOpen, setModalOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [pageError, setPageError] = useState("");
 
   const filteredProjects = useMemo(() => {
     return projects.filter((project) => {
@@ -65,35 +70,67 @@ function Projects({ onOpenProject }: ProjectsProps) {
   }
 
   function closeModal() {
+    if (isSaving) return;
+
     setModalOpen(false);
     setEditingProject(null);
   }
 
-  function saveProject(data: ProjectFormData) {
-    if (editingProject) {
-      updateProject(editingProject.id, data);
-    } else {
-      const owner =
-        members.find((member) => member.role === "Admin") ?? members[0];
+  async function saveProject(data: ProjectFormData) {
+    if (isSaving) return;
 
-      createProject({
-        ...data,
-        startDate: new Date().toISOString().slice(0, 10),
-        ownerId: owner?.id ?? "",
-        memberIds: owner ? [owner.id] : [],
-      });
+    setIsSaving(true);
+    setPageError("");
+
+    try {
+      if (editingProject) {
+        await updateProject(editingProject.id, data);
+      } else {
+        // The backend makes the signed-in user the owner of a new project.
+        const ownerId = user?.id;
+
+        if (!ownerId) {
+          throw new Error("You need to be signed in to create a project.");
+        }
+
+        await createProject({
+          ...data,
+          startDate: new Date().toISOString().slice(0, 10),
+          ownerId,
+          memberIds: [ownerId],
+        });
+      }
+
+      setModalOpen(false);
+      setEditingProject(null);
+    } catch (error) {
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save the project. Please try again."
+      );
+    } finally {
+      setIsSaving(false);
     }
-
-    closeModal();
   }
 
-  function handleDeleteProject(id: string) {
+  async function handleDeleteProject(id: string) {
     const confirmed = window.confirm(
       "Are you sure you want to delete this project? Its associated tasks will also be deleted."
     );
 
-    if (confirmed) {
-      deleteProject(id);
+    if (!confirmed) return;
+
+    setPageError("");
+
+    try {
+      await deleteProject(id);
+    } catch (error) {
+      setPageError(
+        error instanceof Error
+          ? error.message
+          : "Unable to delete the project. Please try again."
+      );
     }
   }
 
@@ -105,7 +142,8 @@ function Projects({ onOpenProject }: ProjectsProps) {
     },
     {
       label: "Completed",
-      value: projects.filter((project) => project.status === "Completed").length,
+      value: projects.filter((project) => project.status === "Completed")
+        .length,
     },
   ];
 
@@ -130,6 +168,12 @@ function Projects({ onOpenProject }: ProjectsProps) {
         </button>
       </section>
 
+      {pageError && (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {pageError}
+        </p>
+      )}
+
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {summary.map((item, index) => (
           <div
@@ -145,7 +189,10 @@ function Projects({ onOpenProject }: ProjectsProps) {
         ))}
       </section>
 
-      <section className="animate-slide-up flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 lg:flex-row lg:items-center lg:justify-between" style={{ animationDelay: "220ms" }}>
+      <section
+        className="animate-slide-up flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 lg:flex-row lg:items-center lg:justify-between"
+        style={{ animationDelay: "220ms" }}
+      >
         <div className="relative w-full lg:max-w-sm">
           <Search
             size={18}
@@ -255,12 +302,15 @@ function Projects({ onOpenProject }: ProjectsProps) {
             <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-50">
               <FolderOpen size={30} className="text-slate-300" />
             </div>
+
             <h3 className="mt-4 font-semibold text-slate-800">
               No projects found
             </h3>
+
             <p className="mt-1 text-sm text-slate-500">
               Try changing your search or filters, or create a project.
             </p>
+
             <button
               onClick={openCreateModal}
               className="mt-5 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-blue-700 hover:shadow-md"

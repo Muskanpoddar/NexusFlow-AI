@@ -2,7 +2,10 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { X, UserPlus, FolderKanban } from "lucide-react";
 
-export type MemberRole = "Admin" | "Manager" | "Member";
+import { formatRole } from "../auth/authService";
+import type { MemberRole } from "../../types/team";
+
+export type { MemberRole };
 
 export interface TeamProject {
   id: string;
@@ -15,7 +18,6 @@ export interface TeamMember {
   name: string;
   email: string;
   role: MemberRole;
-  department: string;
   joinedAt: string;
   projectIds: string[];
 }
@@ -23,15 +25,23 @@ export interface TeamMember {
 interface MemberModalProps {
   member: TeamMember | null;
   projects: TeamProject[];
+  initialProjectIds?: string[];
+  serverError?: string;
   onClose: () => void;
   onSave: (member: Omit<TeamMember, "id" | "joinedAt">) => void;
 }
 
-function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
+function MemberModal({
+  member,
+  projects,
+  initialProjectIds,
+  serverError,
+  onClose,
+  onSave,
+}: MemberModalProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<MemberRole>("Member");
-  const [department, setDepartment] = useState("");
+  const [role, setRole] = useState<MemberRole>("MEMBER");
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [error, setError] = useState("");
 
@@ -40,17 +50,15 @@ function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
       setName(member.name);
       setEmail(member.email);
       setRole(member.role);
-      setDepartment(member.department);
       setProjectIds(member.projectIds);
     } else {
       setName("");
       setEmail("");
-      setRole("Member");
-      setDepartment("");
-      setProjectIds([]);
+      setRole("MEMBER");
+      setProjectIds(initialProjectIds ?? []);
     }
     setError("");
-  }, [member]);
+  }, [member, initialProjectIds]);
 
   const toggleProject = (projectId: string) => {
     setProjectIds((current) =>
@@ -63,8 +71,8 @@ function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!name.trim() || !email.trim()) {
-      setError("Name and email are required.");
+    if (!email.trim()) {
+      setError("Email is required.");
       return;
     }
 
@@ -77,7 +85,6 @@ function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
       name: name.trim(),
       email: email.trim(),
       role,
-      department: department.trim() || "General",
       projectIds,
     });
   };
@@ -105,6 +112,12 @@ function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 p-6">
+          {serverError && (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+              {serverError}
+            </p>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="sm:col-span-2">
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -112,9 +125,10 @@ function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
               </label>
               <input
                 value={name}
+                readOnly={Boolean(member)}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Enter full name"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 read-only:bg-slate-50"
               />
             </div>
 
@@ -125,37 +139,46 @@ function MemberModal({ member, projects, onClose, onSave }: MemberModalProps) {
               <input
                 type="email"
                 value={email}
+                readOnly={Boolean(member)}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="name@company.com"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-50 read-only:bg-slate-50"
               />
+              <p className="mt-1.5 text-xs text-slate-400">
+                {member
+                  ? "Name and email come from the member's own account."
+                  : "The person must already have a NexusFlow account — we add them by email."}
+              </p>
             </div>
 
             <div>
               <label className="mb-1.5 block text-sm font-medium text-slate-700">
                 Role
               </label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as MemberRole)}
-                className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-500"
-              >
-                <option value="Admin">Admin</option>
-                <option value="Manager">Manager</option>
-                <option value="Member">Member</option>
-              </select>
-            </div>
 
-            <div>
-              <label className="mb-1.5 block text-sm font-medium text-slate-700">
-                Department
-              </label>
-              <input
-                value={department}
-                onChange={(e) => setDepartment(e.target.value)}
-                placeholder="e.g. Engineering"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-indigo-500"
-              />
+              {member?.role === "OWNER" ? (
+                <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                  <span className="font-medium">
+                    {formatRole(member.role)}
+                  </span>
+
+                  <span className="text-xs text-slate-400">
+                    The owner role cannot be changed.
+                  </span>
+                </div>
+              ) : (
+                <select
+                  value={role}
+                  onChange={(e) =>
+                    setRole(e.target.value as MemberRole)
+                  }
+                  className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-indigo-500"
+                >
+                  <option value="ADMIN">{formatRole("ADMIN")}</option>
+                  <option value="MANAGER">{formatRole("MANAGER")}</option>
+                  <option value="MEMBER">{formatRole("MEMBER")}</option>
+                </select>
+              )}
             </div>
           </div>
 

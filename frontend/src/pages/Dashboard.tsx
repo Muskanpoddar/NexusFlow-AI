@@ -9,6 +9,7 @@ import {
 
 import { useWorkspace } from "../hooks/useWorkspace";
 import StatCard from "../features/dashboard/StatCard";
+import ActivityFeed from "../features/dashboard/ActivityFeed";
 import RecentProjects from "../features/dashboard/RecentProjects";
 
 function Dashboard() {
@@ -88,6 +89,10 @@ function Dashboard() {
 
       <section className="animate-slide-up" style={{ animationDelay: "300ms" }}>
         <RecentProjects />
+      </section>
+
+      <section className="animate-slide-up" style={{ animationDelay: "380ms" }}>
+        <ActivityFeed />
       </section>
     </div>
   );

@@ -7,6 +7,7 @@ import {
   Users,
   Settings,
   HelpCircle,
+  User,
   Zap,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ const navigation = [
 
 const managementNavigation = [
   { name: "Team Members", icon: Users },
+  { name: "Profile", icon: User },
   { name: "Settings", icon: Settings },
 ];
 
@@ -102,7 +104,16 @@ function Sidebar({ activePage, onNavigate }: SidebarProps) {
       </div>
 
       <div className="border-t border-slate-800 p-4">
-        <button className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-slate-400 transition-all duration-200 hover:bg-slate-800 hover:text-white">
+        <button
+          type="button"
+          onClick={() => onNavigate("Help & Support")}
+          aria-current={activePage === "Help & Support" ? "page" : undefined}
+          className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-all duration-200 ${
+            activePage === "Help & Support"
+              ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
+              : "text-slate-400 hover:bg-slate-800 hover:text-white"
+          }`}
+        >
           <HelpCircle
             size={19}
             className="shrink-0 transition-transform duration-200 group-hover:scale-110"
