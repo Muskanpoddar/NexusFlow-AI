@@ -1,6 +1,6 @@
 
 export type ProjectStatus = "Planning" | "Active" | "On Hold" | "Completed";
-export type ProjectPriority = "Low" | "Medium" | "High";
+export type ProjectPriority = "Low" | "Medium" | "High" | "Urgent";
 
 export interface Project {
   id: string;

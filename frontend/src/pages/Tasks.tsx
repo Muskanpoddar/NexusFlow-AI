@@ -305,6 +305,7 @@ function Tasks() {
             style={{ animationDelay: "120ms" }}
           >
             <option value="All">All priorities</option>
+            <option value="Urgent">Urgent priority</option>
             <option value="High">High priority</option>
             <option value="Medium">Medium priority</option>
             <option value="Low">Low priority</option>

@@ -26,6 +26,7 @@ export default function ProjectCard({
     Low: "text-emerald-600",
     Medium: "text-amber-600",
     High: "text-red-600",
+    Urgent: "text-red-700",
   };
 
   return (

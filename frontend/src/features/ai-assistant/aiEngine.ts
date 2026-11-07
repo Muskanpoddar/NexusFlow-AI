@@ -226,10 +226,10 @@
       );
     }
 
-    if (task.priority === "High") {
+    if (task.priority === "Urgent" || task.priority === "High") {
       score += 30;
       flags.push("high");
-      reasons.push("High priority");
+      reasons.push(`${task.priority} priority`);
     } else if (task.priority === "Medium") {
       score += 15;
     }

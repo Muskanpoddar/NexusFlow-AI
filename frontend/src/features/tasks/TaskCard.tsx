@@ -23,6 +23,7 @@ export default function TaskCard({
     Low: "bg-emerald-50 text-emerald-700",
     Medium: "bg-amber-50 text-amber-700",
     High: "bg-red-50 text-red-700",
+    Urgent: "bg-red-100 text-red-800",
   };
 
   const [today] = useState(() => new Date().toISOString().slice(0, 10));
